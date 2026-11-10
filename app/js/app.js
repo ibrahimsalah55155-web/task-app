@@ -50,6 +50,7 @@ const ERR = {
   session: 'انتهت الجلسة. سجّل الدخول مرة أخرى',
   already_archived: 'سجّل شخص آخر أرشفة هذه المهمة للتو',
   path_too_long: 'مسار الفولدر طويل جداً',
+  db_outdated: 'قاعدة البيانات محتاجة تحديث: شغّل ملف update-1.sql في Supabase',
 };
 // Arabic number agreement for "task".
 function tasksN(n) {
@@ -60,7 +61,8 @@ function tasksN(n) {
 }
 const isolate = (s) => `\u2066${s}\u2069`;
 
-const errText = (e) => ERR[e && e.code] || 'حدث خطأ غير متوقع. حاول مرة أخرى';
+// Unknown errors keep the technical message, so a screenshot is enough to diagnose them.
+const errText = (e) => ERR[e && e.code] || `حدث خطأ غير متوقع. حاول مرة أخرى${e && e.message ? ` (${e.message.slice(0, 140)})` : ''}`;
 
 // ====================================================================== theme
 function applyTheme(mode) {

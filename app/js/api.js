@@ -15,6 +15,7 @@ export function toError(e) {
   else if (/banned/i.test(msg)) code = 'banned';
   else if (/failed to fetch|network|load failed|fetch failed|timeout/i.test(msg)) code = 'network';
   else if (/jwt|refresh token|not authenticated|session/i.test(msg)) code = 'session';
+  else if (/schema cache|column .* does not exist|function .* does not exist|could not find the function/i.test(msg)) code = 'db_outdated';
   const err = new Error(msg);
   err.code = code;
   return err;
