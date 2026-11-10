@@ -1,0 +1,14 @@
+{
+  "appId": "app.injaz.tasks",
+  "appName": "إنجاز",
+  "webDir": "app",
+  "android": {
+    "backgroundColor": "#F3F6FA"
+  },
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "css",
+      "initialViewportFitValueHint": "cover"
+    }
+  }
+}

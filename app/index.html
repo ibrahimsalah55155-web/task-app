@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>إنجاز</title>
+  <meta name="description" content="متابعة مهام الفريق وإنجازها">
+  <meta name="theme-color" content="#F3F6FA">
+  <meta name="color-scheme" content="light dark">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="إنجاز">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="preload" href="fonts/plex-arabic-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/plex-arabic-600.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="css/app.css">
+  <script>
+    // Apply the saved theme before first paint.
+    try { var t = localStorage.getItem('injaz.theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+  </script>
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"><i></i><i></i><i></i></div>
+  <div id="root"></div>
+  <div id="layers"></div>
+  <div id="toasts" aria-live="polite"></div>
+  <noscript>يحتاج هذا التطبيق إلى تفعيل JavaScript.</noscript>
+  <script src="vendor/supabase-2.118.0.js"></script>
+  <script type="module" src="js/app.js"></script>
+  <script>
+    // Offline shell for the web version only; the Android app already ships its files.
+    if ('serviceWorker' in navigator && location.protocol === 'https:' && location.hostname !== 'localhost') {
+      window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
+    }
+  </script>
+</body>
+</html>

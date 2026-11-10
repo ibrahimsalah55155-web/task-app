@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <base href="../app/">
+  <title>إنجاز (test)</title>
+  <meta name="theme-color" content="#F3F6FA">
+  <link rel="stylesheet" href="css/app.css">
+  <script>
+    // In-memory stand-in for Supabase, for screenshots and click-through tests.
+    (function () {
+      var q = new URLSearchParams(location.search);
+      var as = q.get('as'); // admin | user | null (signed out)
+      var theme = q.get('theme'); if (theme) document.documentElement.setAttribute('data-theme', theme);
+      var empty = q.get('empty') === '1';
+      var now = Date.now(), M = 60000;
+      var ago = function (m) { return new Date(now - m * M).toISOString(); };
+      var P = [
+        { id: 'a1', username: 'admin', full_name: 'أحمد سمير', role: 'admin', active: true, must_change_password: q.get('mustchange') === '1', created_at: ago(9000) },
+        { id: 'u1', username: 'sara', full_name: 'سارة محمود', role: 'user', active: true, must_change_password: false, created_at: ago(8000) },
+        { id: 'u2', username: 'omar.k', full_name: 'عمر خالد', role: 'user', active: true, must_change_password: false, created_at: ago(7000) },
+        { id: 'u3', username: 'mona', full_name: 'منى إبراهيم', role: 'user', active: false, must_change_password: false, created_at: ago(6000) },
+      ];
+      var T = empty ? [] : [
+        { id: 1, description: 'مراجعة تصميم الصفحة الرئيسية للتطبيق وإرسال الملاحظات للفريق', assigned_to: null, completed: true, completed_by: 'u1', completed_by_name: 'سارة محمود', completed_at: ago(42), created_at: ago(600) },
+        { id: 2, description: 'تجهيز عرض تقديمي لاجتماع العميل يوم الخميس\nيشمل: الأهداف، الجدول الزمني، والميزانية المقترحة', assigned_to: 'u2', completed: false, created_at: ago(300) },
+        { id: 3, description: 'تحديث أيقونات لوحة التحكم بنفس سُمك الخط', assigned_to: null, completed: false, created_at: ago(200) },
+        { id: 4, description: 'تصدير ملفات الشعار بكل المقاسات', assigned_to: 'u1', completed: true, completed_by: 'u1', completed_by_name: 'سارة محمود', completed_at: ago(1500), created_at: ago(2000) },
+        { id: 5, description: 'كتابة نصوص شاشة تسجيل الدخول باللغة العربية', assigned_to: null, completed: true, completed_by: 'u2', completed_by_name: 'عمر خالد', completed_at: ago(180), created_at: ago(900) },
+        { id: 6, description: 'اختبار التطبيق على أجهزة أندرويد بأحجام شاشات مختلفة والتأكد من عدم تداخل العناصر', assigned_to: null, completed: false, created_at: ago(60) },
+      ];
+      var A = empty ? [] : [
+        { id: 9, action: 'task_completed', task_id: 1, task_text: T[0].description, actor_id: 'u1', actor_name: 'سارة محمود', created_at: ago(42), details: {} },
+        { id: 8, action: 'task_created', task_id: 6, task_text: T[5].description, actor_id: 'a1', actor_name: 'أحمد سمير', created_at: ago(60), details: {} },
+        { id: 7, action: 'task_reopened', task_id: 3, task_text: T[2].description, actor_id: 'a1', actor_name: 'أحمد سمير', created_at: ago(100), details: { previous_completed_by_name: 'عمر خالد', previous_completed_at: ago(160) } },
+        { id: 6, action: 'task_completed', task_id: 5, task_text: T[4].description, actor_id: 'u2', actor_name: 'عمر خالد', created_at: ago(180), details: {} },
+        { id: 5, action: 'user_updated', actor_id: 'a1', actor_name: 'أحمد سمير', target_id: 'u3', created_at: ago(1440 + 30), details: { username: 'mona', active: false, old_active: true, role: 'user', old_role: 'user' } },
+        { id: 4, action: 'user_created', actor_id: 'a1', actor_name: 'أحمد سمير', target_id: 'u2', created_at: ago(1440 + 90), details: { username: 'omar.k' } },
+      ];
+      var me = as === 'user' ? P[1] : P[0];
+      var signed = !!as;
+      var delay = function (v, ms) { return new Promise(function (r) { setTimeout(function () { r(v); }, ms == null ? 120 : ms); }); };
+      var fail = function (code) { var e = new Error(code); e.code = code; return Promise.reject(e); };
+      var vis = function () { return me.role === 'admin' ? T : T.filter(function (t) { return !t.assigned_to || t.assigned_to === me.id; }); };
+      var nid = 100;
+      window.__mock = { T: T, P: P, A: A };
+      window.__INJAZ_TEST_API__ = {
+        getSession: function () { return delay(signed ? { user: { id: me.id } } : null, 50); },
+        onAuthChange: function () { return function () {}; },
+        signIn: function (u, p) { if (u === 'admin' && p === 'admin') { signed = true; me = P[0]; return delay({}); } return delay(null, 400).then(function () { return fail('invalid_credentials'); }); },
+        signOut: function () { signed = false; return delay(); },
+        myProfile: function () { return delay(me); },
+        listTasks: function () { return delay(JSON.parse(JSON.stringify(vis())), q.get('slow') ? 4000 : 300); },
+        listProfiles: function () { return delay(JSON.parse(JSON.stringify(P))); },
+        listActivity: function () { return delay(JSON.parse(JSON.stringify(me.role === 'admin' ? A : A.filter(function (a) { return a.actor_id === me.id; })))); },
+        createTask: function (d, a) { var t = { id: nid++, description: d, assigned_to: a || null, completed: false, created_at: new Date().toISOString() }; T.unshift(t); return delay(JSON.parse(JSON.stringify(t))); },
+        updateTask: function (id, d, a) { var t = T.find(function (x) { return x.id === id; }); t.description = d; t.assigned_to = a || null; return delay(JSON.parse(JSON.stringify(t))); },
+        deleteTask: function (id) { var i = T.findIndex(function (x) { return x.id === id; }); T.splice(i, 1); return delay(); },
+        completeTask: function (id) { var t = T.find(function (x) { return x.id === id; }); Object.assign(t, { completed: true, completed_by: me.id, completed_by_name: me.full_name, completed_at: new Date().toISOString() }); return delay(JSON.parse(JSON.stringify(t)), 400); },
+        reopenTask: function (id) { var t = T.find(function (x) { return x.id === id; }); Object.assign(t, { completed: false, completed_by: null, completed_by_name: null, completed_at: null }); return delay(JSON.parse(JSON.stringify(t))); },
+        changeMyPassword: function (c, n) { if (c !== 'admin') return fail('wrong_password'); me.must_change_password = false; return delay(); },
+        updateMyName: function (n) { me.full_name = n; return delay(); },
+        adminCreateUser: function (o) { P.push({ id: 'n' + nid++, username: o.username, full_name: o.fullName, role: o.role, active: true, must_change_password: true, created_at: new Date().toISOString() }); return delay('x'); },
+        adminUpdateUser: function (o) { var p = P.find(function (x) { return x.id === o.id; }); Object.assign(p, { full_name: o.fullName, role: o.role, active: o.active }); return delay(); },
+        adminResetPassword: function () { return delay(); },
+        adminDeleteUser: function (id) { var i = P.findIndex(function (x) { return x.id === id; }); P.splice(i, 1); return delay(); },
+        subscribe: function () { return function () {}; },
+      };
+      try { localStorage.clear(); } catch (e) {}
+    })();
+  </script>
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"><i></i><i></i><i></i></div>
+  <div id="root"></div>
+  <div id="layers"></div>
+  <div id="toasts" aria-live="polite"></div>
+  <script src="vendor/supabase-2.118.0.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

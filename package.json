@@ -1,0 +1,19 @@
+{
+  "name": "injaz-tasks",
+  "version": "1.0.0",
+  "private": true,
+  "description": "إنجاز: Arabic team task tracker (web app + Android APK via Capacitor) backed by Supabase",
+  "scripts": {
+    "serve": "npx --yes serve app -l 5173",
+    "android:add": "cap add android",
+    "android:sync": "cap sync android",
+    "android:build": "cd android && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.3",
+    "@capacitor/core": "8.5.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.3"
+  }
+}
