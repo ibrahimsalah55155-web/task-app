@@ -15,4 +15,4 @@ export const APP_URL = 'https://ibrahimsalah55155-web.github.io/task-app/';
 export const APK_URL = 'https://github.com/ibrahimsalah55155-web/task-app/releases/download/apk-latest/injaz.apk';
 
 export const APP_NAME = 'إنجاز';
-export const APP_VERSION = '1.2.1';
+export const APP_VERSION = '1.2.2';

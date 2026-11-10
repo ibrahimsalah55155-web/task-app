@@ -251,7 +251,8 @@ button.card { width: 100%; color: inherit; font: inherit; }
 .rs-title { font-weight: 500; }
 
 /* ------------------------------------------------------------------ shell */
-.shell { min-height: 100vh; min-height: 100dvh; }
+/* Room for the phone's status bar. Without it the sticky top bar slides down over the page title. */
+.shell { min-height: 100vh; min-height: 100dvh; padding-top: env(safe-area-inset-top, 0px); }
 .shell.enter { animation: fadeIn .5s var(--ease) both; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 30; background: var(--glass-strong); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); }
