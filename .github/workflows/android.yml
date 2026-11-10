@@ -3,7 +3,7 @@ name: Build Android APK
 on:
   push:
     branches: [main]
-    paths: ['app/**', 'android-res/**', 'capacitor.config.json', 'package.json', '.github/workflows/android.yml']
+    paths: ['app/**', 'android-res/**', 'android-keys/**', 'capacitor.config.json', 'package.json', '.github/workflows/android.yml']
   workflow_dispatch:
 
 permissions:
@@ -41,6 +41,9 @@ jobs:
 
       - name: Copy web app into Android project
         run: npx cap sync android
+
+      - name: Use the project's fixed signing key, so new versions install over old ones
+        run: mkdir -p ~/.android && cp android-keys/debug.keystore ~/.android/debug.keystore
 
       - name: Build APK
         working-directory: android
