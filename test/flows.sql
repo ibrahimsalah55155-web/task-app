@@ -86,3 +86,9 @@ select public.set_task_archived((select id from public.tasks where description='
 reset role; select pg_temp.as_user('admin'); set role authenticated;
 select (public.set_task_archived((select id from public.tasks where description='dated'), false)).archived as still_archived;
 select 'u1 history' t, action, actor_name from public.activity where task_text = 'dated' order by id;
+
+-- ===== update 2: privacy
+reset role; select pg_temp.as_user('sara'); set role authenticated;
+select 'sara sees profiles' t, count(*), string_agg(username, ',') from public.profiles;
+reset role; select pg_temp.as_user('admin'); set role authenticated;
+select 'admin sees profiles' t, count(*) from public.profiles;
