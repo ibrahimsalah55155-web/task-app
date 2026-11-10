@@ -9,6 +9,10 @@
     "SystemBars": {
       "insetsHandling": "css",
       "initialViewportFitValueHint": "cover"
+    },
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_injaz",
+      "iconColor": "#C8F031"
     }
   }
 }

@@ -69,6 +69,12 @@ const P = {
   chevL: '<path d="m15 6-6 6 6 6"/>',
   arrow: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
   bolt: '<path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/>',
+  bell: '<path d="M6 16.5V11a6 6 0 1 1 12 0v5.5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
+  chat: '<path d="M4.5 18.5 5.6 15A7.5 7.5 0 1 1 9 18.3z"/><path d="M9 11.5h.01M12 11.5h.01M15 11.5h.01" stroke-width="2.4"/>',
+  send: '<path d="M20 4 3.5 11.2l6.3 2.1 2.1 6.3z"/><path d="m9.8 13.3 4.4-4.4"/>',
+  smile: '<circle cx="12" cy="12" r="8.5"/><path d="M8.5 14a4 4 0 0 0 7 0"/><path d="M9.5 9.5h.01M14.5 9.5h.01" stroke-width="2.4"/>',
+  download: '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5"/><path d="M5 19.5h14"/>',
+  wifiOff: '<path d="m3.5 3.5 17 17"/><path d="M8.7 16.3a4.6 4.6 0 0 1 6.6 0M5.5 13a9 9 0 0 1 4.4-2.5M2.5 9.6a13.6 13.6 0 0 1 3.9-2.5"/>',
 };
 
 export function icon(name, cls = '') {

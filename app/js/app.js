@@ -3,8 +3,9 @@ import { APP_URL, APK_URL, APP_NAME, APP_VERSION } from './config.js';
 import {
   h, icon, logoMark, sheet, confirmDialog, actionSheet, toast, field, passwordField, segmented,
   toggleSwitch, button, setBusy, fmtDate, fmtTime, dayKey, dayLabel, avatar, generatePassword,
-  copyText, countUp, reducedMotion, wait, haptic, closeAllLayers, toDateInput, toTimeInput, fromInputs,
+  copyText, countUp, reducedMotion, wait, haptic, closeAllLayers, toDateInput, toTimeInput, fromInputs, avatarHue as avatarHueOf,
 } from './ui.js';
+import { wordmarkSVG } from './logo.js';
 
 const api = window.__INJAZ_TEST_API__ || createApi();
 const root = document.getElementById('root');
@@ -22,6 +23,11 @@ const S = {
   pending: new Set(),      // task ids with a request in flight
   justDone: new Set(),     // task ids to play the check animation on (next render only)
   hold: new Set(),         // just-completed task ids kept in place briefly
+  messages: [],
+  notifs: [],
+  chatReadAt: pref('chatReadAt', ''),
+  autoFocused: false,
+  report: { mode: 'month', month: '' },
   unsubscribe: null,
 };
 
@@ -50,7 +56,7 @@ const ERR = {
   session: 'انتهت الجلسة. سجّل الدخول مرة أخرى',
   already_archived: 'سجّل شخص آخر أرشفة هذه المهمة للتو',
   path_too_long: 'مسار الفولدر طويل جداً',
-  db_outdated: 'قاعدة البيانات محتاجة تحديث: شغّل ملف update-1.sql في Supabase',
+  db_outdated: 'قاعدة البيانات محتاجة تحديث: شغّل آخر ملفات update في Supabase',
 };
 // Arabic number agreement for "task".
 function tasksN(n) {
@@ -92,7 +98,7 @@ async function boot() {
   const t0 = performance.now();
   let session = null;
   try { session = await api.getSession(); } catch (_) {}
-  await wait(Math.max(0, 750 - (performance.now() - t0)));
+  await wait(Math.max(0, (reducedMotion() ? 400 : 1900) - (performance.now() - t0)));
   if (!session) { showLogin(); return; }
   await enterApp();
 }
@@ -132,8 +138,9 @@ function leaveApp(message) {
 // ====================================================================== splash
 function showSplash() {
   root.replaceChildren(h('div', { class: 'splash' },
-    h('div', { class: 'splash-mark' }, logoMark(84)),
-    h('div', { class: 'splash-name' }, APP_NAME)));
+    h('div', { class: 'splash-logo' }, wordmarkSVG()),
+    h('span', { class: 'splash-line', 'aria-hidden': 'true' }),
+    h('p', { class: 'splash-tag' }, 'مهام الفريق، في مكان واحد')));
 }
 
 function showOffline() {
@@ -150,8 +157,8 @@ function showLogin(message = '') {
   const err = h('p', { class: 'form-error', role: 'alert' }, message);
   const submit = button('تسجيل الدخول', { type: 'submit', block: true });
   const card = h('form', { class: 'auth-card glass-strong', novalidate: true },
-    h('div', { class: 'auth-brand' }, logoMark(64),
-      h('h1', { class: 'auth-title' }, APP_NAME),
+    h('div', { class: 'auth-brand' },
+      h('h1', { class: 'auth-logo' }, wordmarkSVG()),
       h('p', { class: 'auth-sub' }, 'سجّل دخولك لمتابعة مهام الفريق')),
     h('div', { class: 'stack' }, user.wrap, pass.wrap),
     err, submit);
@@ -235,81 +242,98 @@ function showForcedPassword() {
 
 // ====================================================================== shell
 const ROUTES = {
-  home:     { label: 'الرئيسية', icon: 'home',  admin: true,  title: 'الرئيسية' },
-  tasks:    { label: 'المهام',   icon: 'tasks', admin: false, title: 'المهام' },
-  users:    { label: 'المستخدمون', icon: 'users', admin: true, title: 'المستخدمون' },
-  activity: { label: 'السجل',    icon: 'clock', admin: false, title: 'السجل' },
+  home:     { label: 'الرئيسية',   icon: 'home',    admin: true },
+  tasks:    { label: 'المهام',     icon: 'tasks',   admin: false },
+  chat:     { label: 'المحادثة',   icon: 'chat',    admin: false },
+  reports:  { label: 'التقارير',   icon: 'archive', admin: true },
+  users:    { label: 'المستخدمون', icon: 'users',   admin: true },
+  activity: { label: 'السجل',      icon: 'clock',   admin: false },
 };
-const routesFor = () => Object.keys(ROUTES).filter((r) => isAdmin() || !ROUTES[r].admin);
+const tabsFor = () => (isAdmin() ? ['home', 'tasks', 'chat', 'reports', 'users'] : ['tasks', 'chat', 'activity']);
+const routeOk = (r) => !!ROUTES[r] && (isAdmin() || !ROUTES[r].admin);
+const tabLabel = (r) => (r === 'activity' && !isAdmin() ? 'سجلي' : ROUTES[r].label);
 
 let shell = null;
 
 function showShell(animate) {
-  const headerTitle = h('div', { class: 'bar-title' });
-  const addBtn = h('button', { class: 'icon-btn accent', type: 'button', 'aria-label': 'إضافة' }, icon('plus'));
-  const meBtn = h('button', { class: 'avatar-btn', type: 'button', 'aria-label': 'حسابي' }, avatar(S.me, 34));
+  const bellBadge = h('span', { class: 'badge', hidden: true });
+  const bell = h('button', { class: 'icon-btn bell', type: 'button', 'aria-label': 'الإشعارات', onclick: openNotifications }, icon('bell'), bellBadge);
+  const meBtn = h('button', { class: 'avatar-btn', type: 'button', 'aria-label': 'حسابي', onclick: openProfile }, avatar(S.me, 36));
+  const brand = h('div', { class: 'brand', role: 'img', 'aria-label': APP_NAME }, wordmarkSVG());
   const header = h('header', { class: 'topbar' },
-    h('div', { class: 'topbar-inner' }, headerTitle, h('div', { class: 'bar-actions' }, addBtn, meBtn)));
+    h('div', { class: 'topbar-inner' }, h('div', { class: 'bar-start' }, meBtn, bell), brand));
 
   const view = h('main', { class: 'view', id: 'view' });
-  const tabs = routesFor();
+  const tabs = tabsFor();
   const indicator = h('span', { class: 'tab-indicator', 'aria-hidden': 'true' });
-  const tabBtns = tabs.map((r) => h('button', { class: 'tab', type: 'button', dataset: { r }, onclick: () => go(r) },
-    icon(ROUTES[r].icon), h('span', null, r === 'activity' && !isAdmin() ? 'سجلي' : ROUTES[r].label)));
+  const tabBadges = {};
+  const tabBtns = tabs.map((r) => {
+    tabBadges[r] = h('span', { class: 'badge', hidden: true });
+    return h('button', { class: 'tab', type: 'button', dataset: { r }, onclick: () => go(r) }, icon(ROUTES[r].icon), h('span', null, tabLabel(r)), tabBadges[r]);
+  });
   const tabbar = h('nav', { class: 'tabbar', style: { '--n': tabs.length } }, h('div', { class: 'tabbar-inner' }, indicator, tabBtns));
+  const fab = h('button', { class: 'fab', type: 'button', 'aria-label': 'إضافة', hidden: true }, icon('plus'));
 
-  const el = h('div', { class: 'shell' + (animate ? ' enter' : '') }, header, view, tabbar);
+  const el = h('div', { class: 'shell' + (animate ? ' enter' : '') }, header, view, fab, tabbar);
   root.replaceChildren(el);
-  shell = { el, header, headerTitle, addBtn, meBtn, view, tabBtns, screen: null };
+  shell = { el, header, view, tabBtns, tabbar, fab, bell, bellBadge, tabBadges, screen: null, extra: null };
+  fab.addEventListener('click', () => shell.screen && shell.screen.add && shell.screen.add());
 
-  addBtn.addEventListener('click', () => shell.screen && shell.screen.add && shell.screen.add());
-  meBtn.addEventListener('click', openProfile);
-
-  // data
   S.status = loadCache() ? 'ready' : 'loading';
+  S.autoFocused = false;
   const start = (location.hash || '').slice(1);
-  go(tabs.includes(start) ? start : (isAdmin() ? 'home' : 'tasks'), true);
+  go(routeOk(start) ? start : (isAdmin() ? 'home' : 'tasks'), true);
   loadAll();
   if (S.unsubscribe) S.unsubscribe();
   S.unsubscribe = api.subscribe(onLiveChange);
+  ensureNotifPermission();
+  checkForUpdate();
 }
 
 window.addEventListener('scroll', () => onScroll(), { passive: true });
 function onScroll() {
   if (!shell) return;
-  shell.header.classList.toggle('scrolled', window.scrollY > 36);
+  shell.header.classList.toggle('scrolled', window.scrollY > 12);
 }
 
 function go(route, first = false) {
-  if (!shell || (S.route === route && !first)) { if (S.route === route) window.scrollTo({ top: 0, behavior: reducedMotion() ? 'auto' : 'smooth' }); return; }
+  if (!shell || !routeOk(route)) return;
+  if (S.route === route && !first) { window.scrollTo({ top: 0, behavior: reducedMotion() ? 'auto' : 'smooth' }); return; }
   S.route = route;
   try { history.replaceState(history.state, '', '#' + route); } catch (_) {}
+  const tabs = tabsFor();
   shell.tabBtns.forEach((b, i) => {
     const on = b.dataset.r === route;
     b.classList.toggle('on', on);
     b.setAttribute('aria-current', on ? 'page' : 'false');
-    if (on) shell.el.querySelector('.tabbar').style.setProperty('--i', i);
+    if (on) shell.tabbar.style.setProperty('--i', i);
   });
-  const title = route === 'activity' && !isAdmin() ? 'سجلي' : ROUTES[route].title;
-  shell.headerTitle.textContent = title;
+  shell.tabbar.querySelector('.tab-indicator').style.opacity = tabs.includes(route) ? '' : '0';
+  if (shell.extra) { shell.extra.remove(); shell.extra = null; }
   const screen = SCREENS[route]();
   shell.screen = screen;
-  shell.addBtn.hidden = !screen.add;
+  shell.fab.hidden = !screen.add;
+  shell.view.classList.toggle('chat-view', route === 'chat');
   const page = h('div', { class: 'page' + (first ? '' : ' page-in') });
   screen.mount(page);
   shell.view.replaceChildren(page);
   window.scrollTo(0, 0);
   onScroll();
   screen.update();
+  updateBadges();
 }
 
-function refresh() { if (shell && shell.screen) shell.screen.update(); }
+function refresh() { if (shell && shell.screen) shell.screen.update(); updateBadges(); }
 
 async function loadAll(silent = false) {
   if (!S.tasks.length && !silent) { S.status = 'loading'; refresh(); }
   try {
     const [tasks, profiles, activity] = await Promise.all([api.listTasks(), api.listProfiles(), api.listActivity()]);
     S.tasks = tasks || []; S.profiles = profiles || []; S.activity = activity || [];
+    // Chat and notifications arrive with update 3; the rest of the app works without them.
+    const [msgs, notifs] = await Promise.allSettled([api.listMessages(), api.listNotifications()]);
+    if (msgs.status === 'fulfilled') S.messages = msgs.value || [];
+    if (notifs.status === 'fulfilled') S.notifs = notifs.value || [];
     const me = S.profiles.find((p) => p.id === S.me.id);
     if (me) {
       if (!me.active) { await signOutNow(ERR.banned); return; }
@@ -325,15 +349,157 @@ async function loadAll(silent = false) {
     else if (!silent) toast(errText(e), 'error');
   }
   refresh();
+  if (S.status === 'ready' && !S.autoFocused) { S.autoFocused = true; afterFirstLoad(); }
+}
+
+// On opening the app: jump to the newest task someone gave me, and tell the admin a month report is ready.
+function afterFirstLoad() {
+  const fresh = S.notifs.filter((n) => !n.read_at && n.kind === 'task_assigned' && n.task_id)
+    .map((n) => ({ n, t: S.tasks.find((t) => t.id === n.task_id && !t.completed) })).filter((x) => x.t);
+  if (fresh.length) {
+    setTimeout(() => focusTask(fresh[0].t.id), 350);
+    markRead(fresh.map((x) => x.n.id));
+  }
+  if (isAdmin()) {
+    const now = new Date();
+    const prev = monthKeyOf(new Date(now.getFullYear(), now.getMonth() - 1, 15).toISOString());
+    if (pref('reportSeen', '') !== prev && S.tasks.some((t) => monthKeyOf(openedAt(t)) === prev)) {
+      setPref('reportSeen', prev);
+      setTimeout(() => showBanner({ iconName: 'archive', title: `تقرير شهر ${monthLabel(prev)} جاهز`, body: 'إحصائيات كل مستخدم: المكتمل وغير المكتمل',
+        onClick: () => { S.report = { mode: 'month', month: prev }; go('reports'); } }), fresh.length ? 2600 : 900);
+    }
+  }
 }
 
 let liveTimer;
-function onLiveChange() {
+function onLiveChange(table, payload) {
+  if (table === 'messages') return onMessageEvent(payload);
+  if (table === 'notifications') return onNotificationEvent(payload);
   clearTimeout(liveTimer);
   liveTimer = setTimeout(() => loadAll(true), 250);
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden && S.me && shell) loadAll(true); });
-window.addEventListener('online', () => { if (S.me && shell) loadAll(true); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && S.me && shell) { loadAll(true); if (S.route === 'chat') markChatRead(); } });
+window.addEventListener('online', () => { setOffline(false); if (S.me && shell) loadAll(true); });
+window.addEventListener('offline', () => setOffline(true));
+
+// ====================================================================== banners & notifications
+function showBanner({ iconName = 'bell', title, body, onClick, plain = false, sticky = false, id }) {
+  const host = document.getElementById('banners');
+  if (id) { const old = host.querySelector(`[data-id="${id}"]`); if (old) old.remove(); }
+  const b = h('button', { class: 'banner' + (plain ? ' plain' : ''), type: 'button', dataset: id ? { id } : null },
+    h('span', { class: 'banner-ic' }, icon(iconName)),
+    h('span', { class: 'banner-text' }, h('span', { class: 'banner-title' }, title), body ? h('span', { class: 'banner-body' }, body) : null),
+    h('span', { class: 'banner-time num' }, fmtTime(new Date().toISOString())));
+  const close = () => { b.classList.remove('in'); setTimeout(() => b.remove(), 300); };
+  b.addEventListener('click', () => { close(); onClick && onClick(); });
+  host.prepend(b);
+  while (host.children.length > 3) host.lastChild.remove();
+  requestAnimationFrame(() => requestAnimationFrame(() => b.classList.add('in')));
+  if (!plain) haptic(25);
+  if (!sticky) setTimeout(close, 5500);
+  return { close };
+}
+
+let offlineBanner = null;
+function setOffline(off) {
+  if (off && !offlineBanner) offlineBanner = showBanner({ iconName: 'wifiOff', title: 'لا يوجد اتصال بالإنترنت', body: 'التغييرات هتتحفظ لما النت يرجع', plain: true, sticky: true, id: 'offline' });
+  if (!off && offlineBanner) { offlineBanner.close(); offlineBanner = null; }
+}
+
+// Android notifications in the status bar (only in the installed app, while it is in the background).
+const LN = () => window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.LocalNotifications;
+async function ensureNotifPermission() {
+  const ln = LN(); if (!ln) return;
+  try { const p = await ln.checkPermissions(); if (p.display !== 'granted') await ln.requestPermissions(); } catch (_) {}
+}
+function systemNotify(title, body) {
+  const ln = LN(); if (!ln || !document.hidden) return;
+  ln.schedule({ notifications: [{ id: Math.floor(Math.random() * 2e9), title, body: body || '', smallIcon: 'ic_stat_injaz', iconColor: '#C8F031' }] }).catch(() => {});
+}
+
+const NOTIF_ICON = { task_assigned: ['tasks', 'accent'], task_self: ['user', 'accent'], task_completed: ['check', 'ok'], task_archived: ['archive', 'ok'] };
+
+function onNotificationEvent(p) {
+  if (!p || p.eventType !== 'INSERT' || !p.new || p.new.user_id !== (S.me && S.me.id)) return;
+  const n = p.new;
+  if (S.notifs.some((x) => x.id === n.id)) return;
+  S.notifs.unshift(n);
+  updateBadges(true);
+  showBanner({ iconName: (NOTIF_ICON[n.kind] || ['bell'])[0], title: n.title, body: n.body, onClick: () => openNotification(n) });
+  systemNotify(n.title, n.body);
+  clearTimeout(liveTimer);
+  liveTimer = setTimeout(() => loadAll(true), 250);
+}
+
+function unreadNotifs() { return S.notifs.filter((n) => !n.read_at).length; }
+function unreadChat() {
+  return S.messages.filter((m) => m.user_id !== (S.me && S.me.id) && (!S.chatReadAt || m.created_at > S.chatReadAt)).length;
+}
+function updateBadges(ringBell = false) {
+  if (!shell) return;
+  const n = unreadNotifs();
+  shell.bellBadge.hidden = !n; shell.bellBadge.textContent = n > 9 ? '9+' : String(n);
+  if (ringBell) { shell.bell.classList.remove('ring'); void shell.bell.offsetWidth; shell.bell.classList.add('ring'); }
+  const c = S.route === 'chat' && !document.hidden ? 0 : unreadChat();
+  if (shell.tabBadges.chat) { shell.tabBadges.chat.hidden = !c; shell.tabBadges.chat.textContent = c > 9 ? '9+' : String(c); }
+}
+
+async function markRead(ids) {
+  const now = new Date().toISOString();
+  S.notifs.forEach((n) => { if (!n.read_at && (!ids || ids.includes(n.id))) n.read_at = now; });
+  updateBadges();
+  try { await api.markNotificationsRead(ids); } catch (_) {}
+}
+
+function openNotification(n) {
+  markRead([n.id]);
+  if (n.task_id && S.tasks.some((t) => t.id === n.task_id)) focusTask(n.task_id);
+  else if (n.task_id) toast('هذه المهمة لم تعد موجودة', 'error');
+}
+
+function openNotifications() {
+  const list = S.notifs.slice(0, 60);
+  let s;
+  const body = list.length
+    ? h('div', { class: 'notifs' }, list.map((n) => {
+      const [ic, tone] = NOTIF_ICON[n.kind] || ['bell', 'accent'];
+      return h('button', { class: 'notif' + (n.read_at ? '' : ' unread'), type: 'button', onclick: () => { s.dismiss(false); setTimeout(() => openNotification(n), 320); } },
+        h('span', { class: 'act-ic ' + tone }, icon(ic)),
+        h('span', { class: 'act-body' }, h('span', { class: 'notif-title' }, n.title), n.body ? h('span', { class: 'notif-body', dir: 'auto' }, n.body) : null),
+        h('time', { class: 'act-time num' }, `${dayKey(n.created_at) === dayKey(new Date().toISOString()) ? '' : fmtDate(n.created_at) + ' '}${fmtTime(n.created_at)}`));
+    }))
+    : stateBlock('clock', 'لا توجد إشعارات', 'هتوصلك هنا المهام الجديدة وكل ما يخصك.');
+  s = sheet({ title: 'الإشعارات', body, tall: true });
+  if (unreadNotifs()) markRead(null);
+}
+
+// Jump to a task and make its card glow twice.
+function focusTask(id) {
+  S.filter = { status: 'all', user: '', date: '', q: '' };
+  if (S.route !== 'tasks') go('tasks'); else refresh();
+  setTimeout(() => {
+    const el = document.querySelector(`[data-task="${id}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
+    el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+    haptic(30);
+    setTimeout(() => el.classList.remove('flash'), 2400);
+  }, 120);
+}
+
+// The installed app checks the website for a newer version and offers the download.
+async function checkForUpdate() {
+  const native = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
+  if (!native || !APP_URL) return;
+  try {
+    const r = await fetch(APP_URL + 'version.json', { cache: 'no-store' });
+    const v = (await r.json()).version;
+    const n = (x) => x.split('.').map(Number);
+    const [a, b] = [n(v), n(APP_VERSION)];
+    const newer = a[0] > b[0] || (a[0] === b[0] && (a[1] > b[1] || (a[1] === b[1] && a[2] > b[2])));
+    if (newer) showBanner({ iconName: 'download', title: `نسخة جديدة متاحة (${v})`, body: 'اضغط هنا لتحميلها', plain: true, sticky: true, id: 'update', onClick: () => { location.href = APK_URL; } });
+  } catch (_) {}
+}
 
 // ====================================================================== shared blocks
 const ILLUSTRATIONS = {
@@ -369,6 +535,39 @@ function largeTitle(text, sub) {
 }
 
 // ====================================================================== tasks
+const MONTHS = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+const WEEKDAYS = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+const monthKeyOf = (iso) => dayKey(iso).slice(0, 7);
+const monthLabel = (key) => { const [y, m] = key.split('-'); return `${MONTHS[Number(m) - 1]} ${y}`; };
+const isAdminTask = (t) => t.by_admin !== false;
+
+// tasks → [[monthKey, [[dayKey, tasks], ...]], ...], newest first
+function groupByDay(list) {
+  const months = new Map();
+  for (const t of list) {
+    const dk = dayKey(openedAt(t)), mk = dk.slice(0, 7);
+    if (!months.has(mk)) months.set(mk, new Map());
+    const days = months.get(mk);
+    if (!days.has(dk)) days.set(dk, []);
+    days.get(dk).push(t);
+  }
+  return [...months.entries()].map(([mk, days]) => [mk, [...days.entries()]]);
+}
+
+function dayPill(dk, n) {
+  const d = new Date(dk + 'T12:00:00');
+  const rel = dayLabel(dk);
+  const isRel = rel === 'اليوم' || rel === 'أمس';
+  return h('div', { class: 'day-sep' }, h('span', { class: 'day-pill' },
+    isRel ? h('b', null, rel) : null, isRel ? '·' : null,
+    `${WEEKDAYS[d.getDay()]} ${isolate(fmtDate(dk + 'T12:00:00'))}`,
+    h('span', { class: 'n' }, `· ${tasksN(n)}`)));
+}
+
+function monthHead(mk, n) {
+  return h('div', { class: 'month-head' }, h('span', { class: 'month-name' }, monthLabel(mk)), h('span', { class: 'month-line' }), h('span', { class: 'month-count' }, tasksN(n)));
+}
+
 function canToggle(t) {
   if (!S.me) return false;
   if (t.completed) return isAdmin() || t.completed_by === S.me.id;
@@ -385,8 +584,8 @@ function visibleTasks() {
     .filter((t) => !f.date || (t.completed_at && dayKey(t.completed_at) === f.date))
     .filter((t) => !q || t.description.toLowerCase().includes(q) || (t.completed_by_name || '').toLowerCase().includes(q)
       || (t.folder_path || '').toLowerCase().includes(q))
-    .sort((a, b) => (sortDone(a) - sortDone(b)) ||
-      (a.completed ? new Date(b.completed_at) - new Date(a.completed_at) : new Date(b.opened_at || b.created_at) - new Date(a.opened_at || a.created_at)));
+    .sort((a, b) => dayKey(openedAt(b)).localeCompare(dayKey(openedAt(a))) || (sortDone(a) - sortDone(b)) ||
+      (new Date(openedAt(b)) - new Date(openedAt(a))));
 }
 
 function checkbox(t) {
@@ -446,8 +645,9 @@ async function toggleTask(id) {
 
 function assignedLabel(t) {
   if (!t.assigned_to) return 'للجميع';
+  if (S.me && t.assigned_to === S.me.id) return 'لك';
   const p = profileById(t.assigned_to);
-  return p ? `لـ ${nameOf(p)}` : 'لمستخدم محذوف';
+  return p ? `لـ ${nameOf(p)}` : 'لمستخدم';
 }
 
 function metaCell(label, value, cls = '') {
@@ -544,14 +744,15 @@ function archiveRow(t) {
 function taskCard(t, i, enter) {
   const desc = h('p', { class: 'task-desc', dir: 'auto' }, t.description);
   const card = h('article', {
-    class: 'card task' + (t.completed ? ' done' : '') + (enter ? ' enter' : ''),
-    style: enter ? { '--d': Math.min(i, 8) * 40 + 'ms' } : null,
+    class: 'card task' + (t.completed ? ' done' : '') + (isAdminTask(t) ? ' from-admin' : '') + (enter ? ' enter' : ''),
+    style: enter ? { '--d': Math.min(i, 8) * 40 + 'ms' } : null, dataset: { task: t.id },
   },
   h('div', { class: 'task-top' },
     checkbox(t),
     h('div', { class: 'task-main' },
       desc,
       h('div', { class: 'task-tags' },
+        isAdminTask(t) ? h('span', { class: 'tag tag-violet' }, icon('shield'), 'من المدير') : h('span', { class: 'tag' }, icon('user'), 'مهمة شخصية'),
         h('span', { class: 'tag tag-accent' }, icon(t.assigned_to ? 'user' : 'users'), assignedLabel(t)),
         t.completed ? h('span', { class: 'tag tag-ok' }, icon('check'), 'تمت') : h('span', { class: 'tag tag-wait' }, icon('clock'), 'قيد التنفيذ'))),
     isAdmin() ? h('button', { class: 'icon-btn sm ghost', type: 'button', 'aria-label': 'خيارات المهمة', onclick: (e) => { e.stopPropagation(); taskMenu(t); } }, icon('more')) : null),
@@ -577,7 +778,7 @@ function dtTd(iso) {
 }
 
 function taskTable(list) {
-  const rows = list.map((t) => h('tr', { class: t.completed ? 'done' : '' },
+  const row = (t) => h('tr', { class: (t.completed ? 'done' : '') + (isAdminTask(t) ? ' from-admin' : ''), dataset: { task: t.id } },
     h('td', { class: 'c-task' }, h('div', { class: 'cell-task' },
       h('span', { class: 'cell-desc', dir: 'auto' }, t.description),
       isAdmin() ? h('button', { class: 'icon-btn xs ghost', type: 'button', 'aria-label': 'خيارات المهمة', onclick: () => taskMenu(t) }, icon('more')) : null)),
@@ -588,7 +789,17 @@ function taskTable(list) {
     h('td', { class: 'c-folder' }, t.folder_path
       ? h('span', { class: 'folder-path' }, t.folder_path)
       : (canSetFolder(t) ? h('button', { class: 'link-btn', type: 'button', onclick: () => folderEditor(t) }, 'إضافة') : '—')),
-    h('td', null, h('div', { class: 'cell-archive' }, archiveBox(t), t.archived ? h('span', { class: 'archive-who' }, t.archived_by_name || '') : null))));
+    h('td', null, h('div', { class: 'cell-archive' }, archiveBox(t), t.archived ? h('span', { class: 'archive-who' }, t.archived_by_name || '') : null)));
+  const rows = [];
+  for (const [mk, days] of groupByDay(list)) {
+    rows.push(h('tr', { class: 'tbl-month' }, h('td', { colspan: 7 }, monthLabel(mk))));
+    for (const [dk, items] of days) {
+      const rel = dayLabel(dk);
+      rows.push(h('tr', { class: 'tbl-day' }, h('td', { colspan: 7 }, (rel === 'اليوم' || rel === 'أمس') ? h('b', null, rel + ' · ') : null,
+        `${WEEKDAYS[new Date(dk + 'T12:00:00').getDay()]} ${isolate(fmtDate(dk + 'T12:00:00'))} · ${tasksN(items.length)}`)));
+      items.forEach((t) => rows.push(row(t)));
+    }
+  }
   return h('div', { class: 'table-wrap card' },
     h('table', { class: 'tbl' },
       h('thead', null, h('tr', null, ['المهمة', 'تم', 'اسم المستخدم', 'الإنشاء', 'الإنجاز', 'مسار الفولدر', 'تم الأرشفة'].map((x) => h('th', null, x)))),
@@ -631,20 +842,23 @@ function taskEditor(t) {
   const time = field({ id: 'task-time', label: 'وقت الإنشاء', type: 'time', value: toTimeInput(when) });
   const folder = field({ id: 'task-folder', label: 'مسار الفولدر (اختياري)', value: t ? t.folder_path || '' : '', dir: 'ltr', placeholder: 'D:\\Projects\\Client\\Logo', maxlength: 500 });
   folder.input.classList.add('mono');
-  const assign = userOptions(t ? t.assigned_to : '', { allLabel: 'الجميع' });
-  assign.id = 'task-assign';
-  const assignWrap = h('label', { class: 'field', for: 'task-assign' }, h('span', { class: 'field-label' }, 'مُسندة إلى'), assign);
+  const admin = isAdmin();
+  const assign = admin ? userOptions(t ? t.assigned_to : '', { allLabel: 'الجميع' }) : null;
+  if (assign) assign.id = 'task-assign';
+  const assignWrap = admin
+    ? h('label', { class: 'field', for: 'task-assign' }, h('span', { class: 'field-label' }, 'مُسندة إلى'), assign)
+    : h('p', { class: 'note' }, 'المهمة هتتسجّل باسمك، وتقدر تعلّم عليها «تم» لما تخلّصها.');
   const err = h('p', { class: 'form-error', role: 'alert' });
   const save = button(editing ? 'حفظ التعديلات' : 'إضافة المهمة', { block: true, type: 'submit', iconName: editing ? 'check' : 'plus' });
   const form = h('form', { class: 'stack', novalidate: true }, desc.wrap,
     h('div', { class: 'row2' }, date.wrap, time.wrap), assignWrap, folder.wrap, err);
-  const s = sheet({ title: editing ? 'تعديل المهمة' : 'مهمة جديدة', body: form, footer: save, tall: true });
+  const s = sheet({ title: editing ? 'تعديل المهمة' : (admin ? 'مهمة جديدة' : 'مهمة شخصية جديدة'), body: form, footer: save, tall: true });
   const submit = async (e) => {
     e && e.preventDefault();
     const text = desc.input.value.trim();
     if (!text) { err.textContent = 'اكتب وصف المهمة'; desc.input.focus(); return; }
     if (!date.input.value) { err.textContent = 'اختر تاريخ الإنشاء'; return; }
-    const fields = { description: text, assignedTo: assign.value, openedAt: fromInputs(date.input.value, time.input.value), folderPath: folder.input.value };
+    const fields = { description: text, assignedTo: admin ? assign.value : S.me.id, openedAt: fromInputs(date.input.value, time.input.value), folderPath: folder.input.value };
     setBusy(save, true);
     try {
       if (editing) {
@@ -666,7 +880,7 @@ function taskEditor(t) {
 function TasksScreen() {
   let list, sub, search, seg, chipsRow, mounted = false;
   return {
-    add: isAdmin() ? () => taskEditor(null) : null,
+    add: () => taskEditor(null),
     mount(page) {
       sub = h('p', { class: 'lt-sub' });
       const lt = h('div', { class: 'large-title' }, h('h1', null, 'المهام'), sub);
@@ -716,14 +930,18 @@ function TasksScreen() {
       const items = visibleTasks();
       if (!S.tasks.length) {
         list.replaceChildren(stateBlock('tasks', 'لا توجد مهام بعد',
-          isAdmin() ? 'أضف أول مهمة لفريقك، وستظهر هنا فوراً على كل الأجهزة.' : 'عندما يضيف المدير مهاماً لك، ستظهر هنا.',
-          isAdmin() ? button('إضافة مهمة', { iconName: 'plus', onclick: () => taskEditor(null) }) : null));
+          isAdmin() ? 'أضف أول مهمة لفريقك، وستظهر هنا فوراً على كل الأجهزة.' : 'لما المدير يضيفلك مهام هتظهر هنا، وتقدر كمان تضيف مهمة لنفسك.',
+          button(isAdmin() ? 'إضافة مهمة' : 'مهمة لنفسي', { iconName: 'plus', onclick: () => taskEditor(null) })));
         return;
       }
       if (!items.length) { list.replaceChildren(stateBlock('search', 'لا توجد نتائج', 'جرّب كلمة بحث أخرى أو غيّر عوامل التصفية.')); return; }
       const enter = !mounted && !reducedMotion();
       mounted = true;
-      list.replaceChildren(S.view === 'table' ? taskTable(items) : h('div', { class: 'list' }, items.map((t, i) => taskCard(t, i, enter))));
+      if (S.view === 'table') { list.replaceChildren(taskTable(items)); return; }
+      let i = 0;
+      list.replaceChildren(h('div', { class: 'groups' }, groupByDay(items).map(([mk, days]) =>
+        h('section', { class: 'month' }, monthHead(mk, days.reduce((n, [, x]) => n + x.length, 0)),
+          days.map(([dk, ts]) => [dayPill(dk, ts.length), h('div', { class: 'list' }, ts.map((t) => taskCard(t, i++, enter)))])))));
     },
   };
 }
@@ -1102,6 +1320,260 @@ function userCard(p, i, enter) {
   icon('chevron', 'row-chev'));
 }
 
+// ====================================================================== chat
+const EMOJIS = ['😀', '😂', '🤣', '😊', '😍', '🥰', '😎', '🤩', '😉', '🙂', '🤔', '😅', '😇', '🥳', '😴', '😢',
+  '😭', '😡', '😱', '🤯', '🙏', '👏', '👍', '👎', '👌', '✌️', '🤝', '💪', '👋', '🙌', '❤️', '💚',
+  '💛', '💙', '🔥', '✨', '⭐', '🎉', '🎯', '✅', '❌', '⚠️', '📌', '📎', '📁', '🗂️', '📅', '⏰',
+  '💡', '🎨', '✏️', '🖌️', '💻', '📱', '☕', '🍕', '🚀', '🏆', '💯', '👀', '🤞', '😁', '🤗', '🫡'];
+const onlyEmoji = (s) => s.length <= 16 && /^(?:\p{Extended_Pictographic}|‍|️|\s)+$/u.test(s);
+
+function onMessageEvent(p) {
+  if (!p) return;
+  if (p.eventType === 'DELETE') {
+    const id = p.old && p.old.id;
+    if (id != null) { S.messages = S.messages.filter((m) => m.id !== id); if (S.route === 'chat') refresh(); }
+    return;
+  }
+  if (p.eventType !== 'INSERT' || !p.new) return;
+  const m = p.new;
+  if (S.messages.some((x) => x.id === m.id)) return;
+  S.messages.push(m);
+  const mine = m.user_id === (S.me && S.me.id);
+  if (S.route === 'chat' && !document.hidden) { refresh(); markChatRead(); return; }
+  updateBadges();
+  if (!mine) {
+    showBanner({ iconName: 'chat', title: m.user_name || 'رسالة جديدة', body: m.body, onClick: () => go('chat') });
+    systemNotify(`${m.user_name || ''} · المحادثة`, m.body);
+  }
+}
+
+function markChatRead() {
+  const last = S.messages[S.messages.length - 1];
+  if (last && last.created_at > (S.chatReadAt || '')) { S.chatReadAt = last.created_at; setPref('chatReadAt', last.created_at); }
+  updateBadges();
+}
+
+function messageMenu(m) {
+  const mine = m.user_id === S.me.id;
+  if (!mine && !isAdmin()) return;
+  actionSheet([
+    { value: 'copy', label: 'نسخ الرسالة', icon: 'copy' },
+    { value: 'delete', label: 'حذف الرسالة', icon: 'trash', danger: true },
+  ]).then(async (v) => {
+    if (v === 'copy') { (await copyText(m.body)) && toast('نُسخت الرسالة'); }
+    if (v === 'delete') {
+      const ok = await confirmDialog({ title: 'حذف الرسالة؟', message: 'هتتمسح عند كل الفريق.', confirmText: 'حذف', danger: true });
+      if (!ok) return;
+      try { await api.deleteMessage(m.id); S.messages = S.messages.filter((x) => x.id !== m.id); refresh(); }
+      catch (e) { toast(errText(e), 'error'); }
+    }
+  });
+}
+
+function ChatScreen() {
+  let list, ta, send, panel, shown = 0;
+  const nearBottom = () => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 220;
+  const toBottom = (smooth) => requestAnimationFrame(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: smooth && !reducedMotion() ? 'smooth' : 'auto' }));
+
+  async function submit() {
+    const body = ta.value.trim();
+    if (!body) return;
+    ta.value = ''; fit(); send.disabled = true;
+    const tmp = { id: 'tmp' + Date.now(), user_id: S.me.id, user_name: nameOf(S.me), username: S.me.username, body, created_at: new Date().toISOString(), pending: true };
+    S.messages.push(tmp); refresh(); toBottom(true);
+    try {
+      const row = await api.sendMessage(body);
+      S.messages = S.messages.filter((m) => m.id !== tmp.id && m.id !== row.id);
+      S.messages.push(row);
+      S.messages.sort((a, b) => a.created_at.localeCompare(b.created_at));
+    } catch (e) {
+      S.messages = S.messages.filter((m) => m.id !== tmp.id);
+      ta.value = body; fit();
+      toast(errText(e), 'error');
+    }
+    refresh(); markChatRead();
+  }
+  function fit() { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 120) + 'px'; send.disabled = !ta.value.trim(); }
+
+  return {
+    add: null,
+    mount(page) {
+      page.append(largeTitle('المحادثة', 'كل الفريق في مكان واحد'));
+      list = h('div', { class: 'chat' });
+      page.append(list);
+      ta = h('textarea', { id: 'chat-input', rows: 1, placeholder: 'اكتب رسالة…', dir: 'auto', maxlength: 2000, 'aria-label': 'رسالة' });
+      send = h('button', { class: 'icon-btn send', type: 'button', 'aria-label': 'إرسال', disabled: true, onclick: submit }, icon('send'));
+      panel = h('div', { class: 'emoji-panel', hidden: true }, EMOJIS.map((e) => h('button', { type: 'button', onclick: () => {
+        const a = ta.selectionStart ?? ta.value.length, b = ta.selectionEnd ?? ta.value.length;
+        ta.value = ta.value.slice(0, a) + e + ta.value.slice(b);
+        const pos = a + e.length; ta.setSelectionRange(pos, pos); fit(); haptic(5);
+      } }, e)));
+      const emojiBtn = h('button', { class: 'icon-btn ghost', type: 'button', 'aria-label': 'إيموجي', onclick: () => { panel.hidden = !panel.hidden; } }, icon('smile'));
+      ta.addEventListener('input', fit);
+      ta.addEventListener('focus', () => { panel.hidden = true; });
+      ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); submit(); } });
+      const composer = h('div', { class: 'composer' }, h('div', { class: 'composer-inner' }, panel, h('div', { class: 'composer-row' }, emojiBtn, ta, send)));
+      shell.el.append(composer);
+      shell.extra = composer;
+    },
+    update() {
+      if (!list) return;
+      const wasNear = nearBottom();
+      if (!S.messages.length) {
+        list.replaceChildren(stateBlock('users', 'ابدأ المحادثة', 'اكتب أول رسالة للفريق، وهتوصل للكل في نفس اللحظة.'));
+        shown = 0; return;
+      }
+      const kids = [];
+      let lastDay = '', prev = null;
+      S.messages.forEach((m, i) => {
+        const dk = dayKey(m.created_at);
+        if (dk !== lastDay) { kids.push(h('div', { class: 'day-sep' }, h('span', { class: 'day-pill' }, dayLabel(dk) === 'اليوم' || dayLabel(dk) === 'أمس' ? h('b', null, dayLabel(dk)) : isolate(fmtDate(m.created_at))))); lastDay = dk; prev = null; }
+        const mine = m.user_id === S.me.id;
+        const cont = prev && prev.user_id === m.user_id && (new Date(m.created_at) - new Date(prev.created_at)) < 5 * 60000;
+        const big = onlyEmoji(m.body.trim());
+        kids.push(h('div', {
+          class: 'msg' + (mine ? ' mine' : '') + (cont ? ' cont' : '') + (big ? ' big' : '') + (i >= shown && shown ? ' new' : ''),
+          style: { '--hue': avatarHueOf(m.user_id), opacity: m.pending ? '.65' : '' }, onclick: () => m.pending || messageMenu(m),
+        },
+        !mine && !cont ? h('span', { class: 'msg-name' }, m.user_name || 'عضو', m.username ? h('span', null, '@' + m.username) : null) : null,
+        h('span', { class: 'msg-body', dir: 'auto' }, m.body),
+        h('time', { class: 'msg-time' }, fmtTime(m.created_at))));
+        prev = m;
+      });
+      const first = shown === 0;
+      shown = S.messages.length;
+      list.replaceChildren(...kids);
+      if (first || wasNear) toBottom(!first);
+      if (!document.hidden) markChatRead();
+    },
+  };
+}
+
+// ====================================================================== reports & archive
+// Per person, per month (by the task's creation date):
+//   assigned  = tasks the admin gave them; personal = tasks they made for themselves;
+//   shared    = team-wide tasks they completed.
+function statsFor(uid, mk) {
+  const inMonth = (t) => !mk || monthKeyOf(openedAt(t)) === mk;
+  const assigned = S.tasks.filter((t) => isAdminTask(t) && t.assigned_to === uid && inMonth(t));
+  const personal = S.tasks.filter((t) => !isAdminTask(t) && t.assigned_to === uid && inMonth(t));
+  const shared = S.tasks.filter((t) => !t.assigned_to && t.completed && t.completed_by === uid && inMonth(t));
+  const done = (a) => a.filter((t) => t.completed).length;
+  const r = {
+    assigned: { total: assigned.length, done: done(assigned) },
+    personal: { total: personal.length, done: done(personal) },
+    shared: shared.length,
+  };
+  r.total = r.assigned.total + r.personal.total + r.shared;
+  r.done = r.assigned.done + r.personal.done + r.shared;
+  r.open = r.total - r.done;
+  return r;
+}
+
+function reportMonths() {
+  const set = new Set(S.tasks.map((t) => monthKeyOf(openedAt(t))));
+  set.add(monthKeyOf(new Date().toISOString()));
+  return [...set].sort().reverse();
+}
+
+function splitBar(done, open) {
+  const t = done + open || 1;
+  return h('div', { class: 'split', 'aria-hidden': 'true' }, h('i', { class: 's-ok', style: { width: (done / t) * 100 + '%' } }), h('i', { class: 's-warn', style: { width: (open / t) * 100 + '%' } }));
+}
+const repCell = (label, v, cls = '') => h('div', { class: 'rep-cell ' + cls }, h('b', null, String(v)), h('span', null, label));
+
+function reportText(mk) {
+  const lines = [`تقرير «${APP_NAME}» · ${monthLabel(mk)}`, ''];
+  S.profiles.forEach((p) => {
+    const r = statsFor(p.id, mk);
+    if (!r.total) return;
+    lines.push(`${nameOf(p)}: ${r.total} (مكتملة ${r.done} · غير مكتملة ${r.open})`);
+    lines.push(`  من المدير ${r.assigned.total} · شخصية ${r.personal.total} · عامة أنجزها ${r.shared}`);
+  });
+  if (lines.length === 2) lines.push('لا توجد مهام في هذا الشهر.');
+  return lines.join('\n');
+}
+
+function userArchive(p) {
+  const months = reportMonths().filter((mk) => statsFor(p.id, mk).total);
+  const all = statsFor(p.id, '');
+  const row = (k, total, done, open, cls = '') => h('div', { class: 'hist-row ' + cls }, h('span', { class: 'k' }, k),
+    h('span', { class: 'v' }, String(total)), h('span', { class: 'v ok' }, String(done)), h('span', { class: 'v warn' }, open === null ? '—' : String(open)));
+  sheet({
+    title: 'أرشيف ' + nameOf(p), tall: true,
+    body: h('div', { class: 'stack' },
+      h('div', { class: 'profile-mini' }, avatar(p, 52), h('div', null,
+        h('p', { class: 'pm-name' }, nameOf(p)), h('p', { class: 'pm-user', dir: 'ltr' }, '@' + p.username),
+        h('p', { class: 'pm-stat' }, `الإجمالي ${all.total} · مكتملة ${all.done} · غير مكتملة ${all.open}`))),
+      months.length ? months.map((mk) => {
+        const r = statsFor(p.id, mk);
+        return h('section', { class: 'card hist-month' },
+          h('div', { class: 'hist-head' }, h('h3', null, monthLabel(mk)), h('span', { class: 'muted' }, tasksN(r.total))),
+          splitBar(r.done, r.open),
+          h('div', { class: 'hist-legend' }, h('span'), h('span', null, 'الإجمالي'), h('span', null, 'مكتملة'), h('span', null, 'غير مكتملة')),
+          row('اتكلّف بيها من المدير', r.assigned.total, r.assigned.done, r.assigned.total - r.assigned.done),
+          row('عملها لنفسه', r.personal.total, r.personal.done, r.personal.total - r.personal.done),
+          row('مهام عامة أنجزها', r.shared, r.shared, null));
+      }) : stateBlock('clock', 'لا يوجد تاريخ بعد', 'لما يشتغل على مهام هتظهر هنا شهر بشهر.')),
+  });
+}
+
+function ReportsScreen() {
+  let host, seg;
+  return {
+    add: null,
+    mount(page) {
+      page.append(largeTitle('التقارير', 'إحصائيات كل مستخدم شهرياً، وأرشيف تاريخ كل واحد'));
+      seg = segmented([{ value: 'month', label: 'تقرير الشهر' }, { value: 'archive', label: 'الأرشيف' }], S.report.mode,
+        (v) => { S.report.mode = v; this.update(); }, { id: 'rep-mode' });
+      host = h('div', { class: 'stack' });
+      page.append(seg.el, host);
+    },
+    update() {
+      if (!host) return;
+      if (S.status === 'loading' && !S.tasks.length) { host.replaceChildren(skeletonCards(3)); return; }
+      if (S.status === 'error' && !S.tasks.length) { host.replaceChildren(errorBlock()); return; }
+      const people = [...S.profiles].sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'ar'));
+      if (S.report.mode === 'archive') {
+        host.replaceChildren(h('div', { class: 'list' }, people.map((p) => {
+          const r = statsFor(p.id, '');
+          return h('button', { class: 'card user' + (p.active ? '' : ' off'), type: 'button', onclick: () => userArchive(p) },
+            avatar(p, 44),
+            h('div', { class: 'user-main' }, h('span', { class: 'user-name' }, nameOf(p)), h('span', { class: 'user-handle', dir: 'ltr' }, '@' + p.username),
+              h('div', { class: 'task-tags' }, h('span', { class: 'tag tag-ok' }, `مكتملة ${r.done}`), h('span', { class: 'tag tag-wait' }, `غير مكتملة ${r.open}`))),
+            icon('chevron', 'row-chev'));
+        })));
+        return;
+      }
+      const months = reportMonths();
+      if (!months.includes(S.report.month)) S.report.month = months[0];
+      const mk = S.report.month;
+      const chips = h('div', { class: 'months' }, months.map((m) => h('button', { class: 'chip' + (m === mk ? ' on' : ''), type: 'button',
+        onclick: () => { S.report.month = m; this.update(); } }, icon('calendar'), monthLabel(m))));
+      const rows = people.map((p) => ({ p, r: statsFor(p.id, mk) })).filter((x) => x.r.total).sort((a, b) => b.r.total - a.r.total);
+      const sum = rows.reduce((a, { r }) => ({ total: a.total + r.total, done: a.done + r.done, open: a.open + r.open }), { total: 0, done: 0, open: 0 });
+      const share = button('مشاركة التقرير', { iconName: 'share', kind: 'secondary' });
+      share.addEventListener('click', async () => {
+        const text = reportText(mk);
+        if (navigator.share) { try { await navigator.share({ text }); return; } catch (_) { return; } }
+        (await copyText(text)) ? toast('نُسخ التقرير') : toast('لم يتم النسخ', 'error');
+      });
+      host.replaceChildren(chips,
+        h('div', { class: 'report-sum' },
+          h('div', { class: 'card sum' }, h('b', null, String(sum.total)), h('span', null, 'كل المهام')),
+          h('div', { class: 'card sum ok' }, h('b', null, String(sum.done)), h('span', null, 'مكتملة')),
+          h('div', { class: 'card sum warn' }, h('b', null, String(sum.open)), h('span', null, 'غير مكتملة'))),
+        rows.length ? h('div', { class: 'list' }, rows.map(({ p, r }) => h('button', { class: 'card rep-user', type: 'button', onclick: () => userArchive(p) },
+          h('div', { class: 'rep-top' }, avatar(p, 40), h('div', { class: 'user-main' }, h('span', { class: 'user-name' }, nameOf(p)),
+            h('span', { class: 'user-handle' }, `من المدير ${r.assigned.total} · شخصية ${r.personal.total} · عامة ${r.shared}`)), icon('chevron', 'row-chev')),
+          splitBar(r.done, r.open),
+          h('div', { class: 'rep-grid' }, repCell('الإجمالي', r.total, 'violet'), repCell('مكتملة', r.done, 'ok'), repCell('غير مكتملة', r.open, 'warn')))))
+          : stateBlock('clock', 'لا توجد مهام في هذا الشهر', 'اختر شهراً آخر من فوق.'),
+        share);
+    },
+  };
+}
+
 // ====================================================================== profile
 function openProfile() {
   const p = S.me;
@@ -1146,6 +1618,6 @@ function openProfile() {
   });
 }
 
-const SCREENS = { home: HomeScreen, tasks: TasksScreen, users: UsersScreen, activity: ActivityScreen };
+const SCREENS = { home: HomeScreen, tasks: TasksScreen, chat: ChatScreen, reports: ReportsScreen, users: UsersScreen, activity: ActivityScreen };
 
 boot();

@@ -88,9 +88,17 @@ export function createApi() {
     adminResetPassword: (id, password) => run(sb.rpc('admin_reset_password', { p_id: id, p_password: password })),
     adminDeleteUser: (id) => run(sb.rpc('admin_delete_user', { p_id: id })),
 
+    listMessages: (limit = 300) =>
+      run(sb.from('messages').select('*').order('created_at', { ascending: false }).limit(limit)).then((r) => (r || []).reverse()),
+    sendMessage: (body) => run(sb.from('messages').insert({ body }).select().single()),
+    deleteMessage: (id) => run(sb.from('messages').delete().eq('id', id)),
+    listNotifications: (limit = 100) =>
+      run(sb.from('notifications').select('*').order('created_at', { ascending: false }).limit(limit)),
+    markNotificationsRead: (ids) => run(sb.rpc('mark_notifications_read', { p_ids: ids || null })),
+
     subscribe(onChange) {
       const ch = sb.channel('injaz-live');
-      for (const table of ['tasks', 'profiles', 'activity']) {
+      for (const table of ['tasks', 'profiles', 'activity', 'messages', 'notifications']) {
         ch.on('postgres_changes', { event: '*', schema: 'public', table }, (p) => onChange(table, p));
       }
       ch.subscribe();

@@ -92,3 +92,25 @@ reset role; select pg_temp.as_user('sara'); set role authenticated;
 select 'sara sees profiles' t, count(*), string_agg(username, ',') from public.profiles;
 reset role; select pg_temp.as_user('admin'); set role authenticated;
 select 'admin sees profiles' t, count(*) from public.profiles;
+
+-- ===== update 3: personal tasks, chat, notifications
+reset role; select pg_temp.as_user('admin'); set role authenticated;
+select public.admin_create_user('nour', 'Temp12345', 'نور', 'user') is not null as nour;
+insert into public.tasks (description) values ('for everyone u3');
+insert into public.tasks (description, assigned_to) values ('for nour u3', (select id from public.profiles where username='nour'));
+select pg_temp.as_user('nour');
+select 'nour notifs' t, kind, title from public.notifications order by id;
+insert into public.tasks (description, assigned_to) values ('nour own', (select id from public.profiles where username='admin'));  -- forced to nour
+select 'nour own task' t, assigned_to = auth.uid() as mine, by_admin from public.tasks where description='nour own';
+update public.tasks set description='x' where description='nour own';   -- 0 rows (cannot edit)
+select (public.complete_task((select id from public.tasks where description='nour own'))).completed as done;
+insert into public.messages (body) values ('  أهلاً يا جماعة 👋  ');
+insert into public.messages (body, user_name) values ('fake', 'admin');      -- expect permission denied
+select 'chat' t, user_name, username, body from public.messages;
+select public.mark_notifications_read(null);
+select 'nour unread' t, count(*) from public.notifications where read_at is null;
+reset role; select pg_temp.as_user('admin'); set role authenticated;
+select 'admin notifs' t, kind, title from public.notifications order by id;
+select 'admin sees chat' t, count(*) from public.messages;
+delete from public.messages;
+select 'chat after admin delete' t, count(*) from public.messages;

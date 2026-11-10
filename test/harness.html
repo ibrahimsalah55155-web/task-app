@@ -30,6 +30,25 @@
         { id: 5, description: 'كتابة نصوص شاشة تسجيل الدخول باللغة العربية', assigned_to: null, completed: true, completed_by: 'u2', completed_by_name: 'عمر خالد', completed_at: ago(180), created_at: ago(900), opened_at: ago(900), folder_path: 'Drive/Injaz/Copy/Login' },
         { id: 6, description: 'اختبار التطبيق على أجهزة أندرويد بأحجام شاشات مختلفة والتأكد من عدم تداخل العناصر', assigned_to: null, completed: false, created_at: ago(60) },
       ];
+      if (!empty) {
+        T.forEach(function (t) { t.opened_at = t.opened_at || t.created_at; t.by_admin = true; });
+        T[3].opened_at = ago(1500); T[3].completed_at = ago(1400);
+        T[4].opened_at = ago(45000); T[4].completed_at = ago(44000);
+        T[5].by_admin = false; T[5].assigned_to = 'u1';
+        T.push({ id: 7, description: 'تجهيز مود بورد لهوية المطعم الجديد', assigned_to: 'u2', by_admin: true, completed: true, completed_by: 'u2', completed_by_name: 'عمر خالد', completed_at: ago(46000), opened_at: ago(47000), created_at: ago(47000) });
+        T.push({ id: 8, description: 'مراجعة شخصية لملفات الطباعة', assigned_to: 'u2', by_admin: false, completed: false, opened_at: ago(46500), created_at: ago(46500) });
+      }
+      var MS = empty ? [] : [
+        { id: 1, user_id: 'a1', user_name: 'أحمد سمير', username: 'admin', body: 'صباح الخير يا فريق ☀️ عندنا تسليم الخميس', created_at: ago(200) },
+        { id: 2, user_id: 'u1', user_name: 'سارة محمود', username: 'sara', body: 'تمام، أنا خلصت مراجعة الصفحة الرئيسية', created_at: ago(190) },
+        { id: 3, user_id: 'u1', user_name: 'سارة محمود', username: 'sara', body: 'الملفات على الدرايف في فولدر Home-Review', created_at: ago(189) },
+        { id: 4, user_id: 'u2', user_name: 'عمر خالد', username: 'omar.k', body: '👍🔥', created_at: ago(150) },
+        { id: 5, user_id: 'a1', user_name: 'أحمد سمير', username: 'admin', body: 'ممتاز، شكراً يا جماعة 🙏', created_at: ago(20) },
+      ];
+      var NS = empty ? [] : [
+        { id: 1, user_id: q.get('as') === 'user' ? 'u1' : 'a1', kind: 'task_assigned', title: 'مهمة جديدة لك', body: 'تحديث أيقونات لوحة التحكم بنفس سُمك الخط', task_id: 3, created_at: ago(30), read_at: null },
+        { id: 2, user_id: 'a1', kind: 'task_completed', title: 'تم إنجاز مهمة · سارة محمود', body: 'مراجعة تصميم الصفحة الرئيسية', task_id: 1, created_at: ago(42), read_at: ago(10) },
+      ];
       var A = empty ? [] : [
         { id: 10, action: 'task_archived', task_id: 1, task_text: T[0].description, actor_id: 'u1', actor_name: 'سارة محمود', created_at: ago(30), details: {} },
         { id: 9, action: 'task_completed', task_id: 1, task_text: T[0].description, actor_id: 'u1', actor_name: 'سارة محمود', created_at: ago(42), details: {} },
@@ -68,7 +87,12 @@
         adminUpdateUser: function (o) { var p = P.find(function (x) { return x.id === o.id; }); Object.assign(p, { full_name: o.fullName, role: o.role, active: o.active }); return delay(); },
         adminResetPassword: function () { return delay(); },
         adminDeleteUser: function (id) { var i = P.findIndex(function (x) { return x.id === id; }); P.splice(i, 1); return delay(); },
-        subscribe: function () { return function () {}; },
+        subscribe: function (cb) { window.__live = cb; return function () {}; },
+        listMessages: function () { return delay(JSON.parse(JSON.stringify(MS))); },
+        sendMessage: function (b) { var m = { id: 100 + MS.length, user_id: me.id, user_name: me.full_name, username: me.username, body: b, created_at: new Date().toISOString() }; MS.push(m); return delay(JSON.parse(JSON.stringify(m)), 300); },
+        deleteMessage: function (id) { MS = MS.filter(function (m) { return m.id !== id; }); return delay(); },
+        listNotifications: function () { return delay(JSON.parse(JSON.stringify(NS.filter(function (n) { return n.user_id === me.id; })))); },
+        markNotificationsRead: function () { return delay(); },
       };
       try { localStorage.clear(); if (q.get('theme') === 'light') localStorage.setItem('injaz.theme', 'light'); } catch (e) {}
     })();
@@ -79,6 +103,7 @@
   <div id="root"></div>
   <div id="layers"></div>
   <div id="toasts" aria-live="polite"></div>
+  <div id="banners" aria-live="polite"></div>
   <script src="vendor/supabase-2.118.0.js"></script>
   <script type="module" src="js/app.js"></script>
 </body>
