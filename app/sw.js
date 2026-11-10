@@ -1,6 +1,6 @@
 // Caches the app shell so it opens instantly and survives flaky connections.
 // Data always comes live from Supabase; this never caches API responses.
-const CACHE = 'injaz-v1.2.0';
+const CACHE = 'injaz-v1.2.1';
 const SHELL = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/api.js', 'js/ui.js', 'js/config.js', 'js/logo.js', 'vendor/supabase-2.118.0.js',

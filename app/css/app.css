@@ -256,8 +256,16 @@ button.card { width: 100%; color: inherit; font: inherit; }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 30; background: var(--glass-strong); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); }
 
-.topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; transition: background .25s, border-color .25s; border-bottom: 1px solid transparent; }
-.topbar.scrolled { background: var(--glass-strong); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); border-bottom-color: var(--hairline); }
+/* The top bar is always solid, so nothing that scrolls under it can collide with the logo or buttons. */
+.topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; transition: background .25s, border-color .25s; border-bottom: 1px solid transparent;
+  background: color-mix(in srgb, var(--bg) 92%, transparent); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); }
+.topbar.scrolled { background: var(--glass-strong); border-bottom-color: var(--hairline); }
+/* chat: a compact sticky title under the bar instead of the large page title */
+.chat-head { position: sticky; z-index: 6; top: calc(env(safe-area-inset-top, 0px) + var(--bar-h)); display: flex; align-items: center; gap: var(--s3); padding: 10px 4px 12px;
+  background: linear-gradient(180deg, var(--bg) 75%, transparent); }
+.chat-head .act-ic { width: 40px; height: 40px; }
+.chat-head h1 { font-size: var(--fs-lg); font-weight: 600; line-height: 1.3; }
+.chat-head p { font-size: var(--fs-xs); color: var(--text-2); }
 .topbar-inner { max-width: 720px; margin: 0 auto; height: var(--bar-h); display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
   padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
 .bar-title { font-weight: 600; font-size: var(--fs-md); opacity: 0; transform: translateY(4px); transition: opacity .25s var(--ease), transform .25s var(--ease); }

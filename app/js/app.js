@@ -1373,7 +1373,10 @@ function messageMenu(m) {
 function ChatScreen() {
   let list, ta, send, panel, shown = 0;
   const nearBottom = () => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 220;
-  const toBottom = (smooth) => requestAnimationFrame(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: smooth && !reducedMotion() ? 'smooth' : 'auto' }));
+  const toBottom = (smooth) => requestAnimationFrame(() => {
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: smooth && !reducedMotion() ? 'smooth' : 'auto' });
+    setTimeout(onScroll, smooth ? 450 : 0);
+  });
 
   async function submit() {
     const body = ta.value.trim();
@@ -1398,7 +1401,8 @@ function ChatScreen() {
   return {
     add: null,
     mount(page) {
-      page.append(largeTitle('المحادثة', 'كل الفريق في مكان واحد'));
+      page.append(h('div', { class: 'chat-head' }, h('span', { class: 'act-ic accent' }, icon('chat')),
+        h('div', null, h('h1', null, 'المحادثة'), h('p', null, 'كل الفريق في مكان واحد'))));
       list = h('div', { class: 'chat' });
       page.append(list);
       ta = h('textarea', { id: 'chat-input', rows: 1, placeholder: 'اكتب رسالة…', dir: 'auto', maxlength: 2000, 'aria-label': 'رسالة' });
