@@ -1,9 +1,9 @@
 import { createApi } from './api.js';
-import { APP_URL, APP_NAME, APP_VERSION } from './config.js';
+import { APP_URL, APK_URL, APP_NAME, APP_VERSION } from './config.js';
 import {
   h, icon, logoMark, sheet, confirmDialog, actionSheet, toast, field, passwordField, segmented,
   toggleSwitch, button, setBusy, fmtDate, fmtTime, dayKey, dayLabel, avatar, generatePassword,
-  copyText, countUp, reducedMotion, wait, haptic, closeAllLayers,
+  copyText, countUp, reducedMotion, wait, haptic, closeAllLayers, toDateInput, toTimeInput, fromInputs,
 } from './ui.js';
 
 const api = window.__INJAZ_TEST_API__ || createApi();
@@ -48,6 +48,8 @@ const ERR = {
   banned: 'هذا الحساب موقوف. تواصل مع المدير',
   network: 'تعذّر الاتصال. تأكد من الإنترنت وحاول مرة أخرى',
   session: 'انتهت الجلسة. سجّل الدخول مرة أخرى',
+  already_archived: 'سجّل شخص آخر أرشفة هذه المهمة للتو',
+  path_too_long: 'مسار الفولدر طويل جداً',
 };
 // Arabic number agreement for "task".
 function tasksN(n) {
@@ -62,12 +64,10 @@ const errText = (e) => ERR[e && e.code] || 'حدث خطأ غير متوقع. ح�
 
 // ====================================================================== theme
 function applyTheme(mode) {
-  const r = document.documentElement;
-  if (mode === 'light' || mode === 'dark') r.setAttribute('data-theme', mode);
-  else r.removeAttribute('data-theme');
-  const dark = mode === 'dark' || (mode !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+  const light = mode === 'light';
+  document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', dark ? '#0B0E14' : '#F3F6FA');
+  if (meta) meta.setAttribute('content', light ? '#EEF0EA' : '#0C0D0F');
 }
 
 // ====================================================================== cache
@@ -85,8 +85,7 @@ function loadCache() {
 
 // ====================================================================== boot
 async function boot() {
-  applyTheme(pref('theme', 'auto'));
-  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => applyTheme(pref('theme', 'auto')));
+  applyTheme(pref('theme', 'dark'));
   showSplash();
   const t0 = performance.now();
   let session = null;
@@ -382,9 +381,10 @@ function visibleTasks() {
     .filter((t) => f.status === 'all' || (f.status === 'done' ? t.completed : !t.completed))
     .filter((t) => !f.user || t.assigned_to === f.user)
     .filter((t) => !f.date || (t.completed_at && dayKey(t.completed_at) === f.date))
-    .filter((t) => !q || t.description.toLowerCase().includes(q) || (t.completed_by_name || '').toLowerCase().includes(q))
+    .filter((t) => !q || t.description.toLowerCase().includes(q) || (t.completed_by_name || '').toLowerCase().includes(q)
+      || (t.folder_path || '').toLowerCase().includes(q))
     .sort((a, b) => (sortDone(a) - sortDone(b)) ||
-      (a.completed ? new Date(b.completed_at) - new Date(a.completed_at) : new Date(b.created_at) - new Date(a.created_at)));
+      (a.completed ? new Date(b.completed_at) - new Date(a.completed_at) : new Date(b.opened_at || b.created_at) - new Date(a.opened_at || a.created_at)));
 }
 
 function checkbox(t) {
@@ -451,6 +451,93 @@ function assignedLabel(t) {
 function metaCell(label, value, cls = '') {
   return h('div', { class: 'meta ' + cls }, h('span', { class: 'meta-k' }, label), h('span', { class: 'meta-v' }, value));
 }
+// Date on top, time underneath.
+function dtCell(label, iso, cls = '') {
+  return h('div', { class: 'meta ' + cls + (iso ? '' : ' empty') }, h('span', { class: 'meta-k' }, label),
+    h('span', { class: 'dt' }, h('b', null, iso ? fmtDate(iso) : '—'), iso ? h('span', null, fmtTime(iso)) : null));
+}
+const openedAt = (t) => t.opened_at || t.created_at;
+
+// ----- archive tick
+const canArchive = (t) => !!S.me && (isAdmin() || !t.assigned_to || t.assigned_to === S.me.id) &&
+  (!t.archived || isAdmin() || t.archived_by === S.me.id);
+
+function archiveBox(t) {
+  const allowed = canArchive(t);
+  const busy = S.pending.has('a' + t.id);
+  const b = h('button', {
+    class: 'check small' + (t.archived ? ' on' : '') + (S.justDone.has('a' + t.id) ? ' pop' : '') + (busy ? ' wait' : ''),
+    type: 'button', role: 'checkbox', 'aria-checked': t.archived ? 'true' : 'false', 'aria-label': 'تم الأرشفة', disabled: !allowed,
+  });
+  b.innerHTML = '<span class="check-box"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 12.5 4 4L18 8"/></svg></span>';
+  b.addEventListener('click', (e) => { e.stopPropagation(); toggleArchive(t.id); });
+  return b;
+}
+
+async function toggleArchive(id) {
+  const t = S.tasks.find((x) => x.id === id);
+  const key = 'a' + id;
+  if (!t || S.pending.has(key) || !canArchive(t)) return;
+  const before = { ...t };
+  const next = !t.archived;
+  if (!next) {
+    const ok = await confirmDialog({ title: 'إلغاء علامة الأرشفة؟', message: 'يبقى تسجيل الأرشفة السابق محفوظاً في السجل.', confirmText: 'إلغاء العلامة' });
+    if (!ok) return;
+  }
+  Object.assign(t, next
+    ? { archived: true, archived_by: S.me.id, archived_by_name: nameOf(S.me), archived_at: new Date().toISOString() }
+    : { archived: false, archived_by: null, archived_by_name: null, archived_at: null });
+  S.pending.add(key);
+  if (next) { S.justDone.add(key); haptic(10); }
+  refresh();
+  S.justDone.delete(key);
+  try { Object.assign(t, (await api.setTaskArchived(id, next)) || {}); if (next) toast('تم تسجيل الأرشفة'); }
+  catch (e) { Object.assign(t, before); toast(errText(e), 'error'); if (e.code === 'already_archived') loadAll(true); }
+  S.pending.delete(key); refresh();
+}
+
+// ----- work folder path
+const canSetFolder = (t) => !!S.me && (isAdmin() || !t.assigned_to || t.assigned_to === S.me.id);
+
+function folderEditor(t) {
+  const f = field({ id: 'folder-path', label: 'مسار الفولدر', value: t.folder_path || '', dir: 'ltr', placeholder: 'D:\\Projects\\Client\\Logo', maxlength: 500, autofocus: true });
+  f.input.classList.add('mono');
+  const err = h('p', { class: 'form-error', role: 'alert' });
+  const save = button('حفظ المسار', { block: true, iconName: 'folder' });
+  const s = sheet({ title: 'مسار الفولدر', body: h('div', { class: 'stack' },
+    h('p', { class: 'muted' }, 'اكتب أو الصق مكان ملفات الشغل، عشان أي حد يلاقيها بسهولة.'), f.wrap, err), footer: save });
+  const submit = async (e) => {
+    e && e.preventDefault();
+    setBusy(save, true);
+    try {
+      const row = await api.setTaskFolder(t.id, f.input.value);
+      Object.assign(S.tasks.find((x) => x.id === t.id) || {}, row || {});
+      toast(f.input.value.trim() ? 'حُفظ المسار' : 'حُذف المسار');
+      s.dismiss(false); refresh();
+    } catch (ex) { setBusy(save, false); err.textContent = errText(ex); }
+  };
+  save.addEventListener('click', submit);
+  f.input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(e); });
+}
+
+function folderRow(t) {
+  if (!t.folder_path) {
+    return canSetFolder(t)
+      ? h('button', { class: 'folder-add', type: 'button', onclick: () => folderEditor(t) }, icon('folderPlus'), 'أضف مسار الفولدر')
+      : null;
+  }
+  const copy = h('button', { class: 'icon-btn xs ghost', type: 'button', 'aria-label': 'نسخ المسار',
+    onclick: async (e) => { e.stopPropagation(); (await copyText(t.folder_path)) ? toast('نُسخ المسار') : toast('لم يتم النسخ', 'error'); } }, icon('copy'));
+  const edit = canSetFolder(t) ? h('button', { class: 'icon-btn xs ghost', type: 'button', 'aria-label': 'تعديل المسار', onclick: () => folderEditor(t) }, icon('edit')) : null;
+  return h('div', { class: 'folder' }, icon('folder'), h('span', { class: 'folder-path' }, t.folder_path), copy, edit);
+}
+
+function archiveRow(t) {
+  return h('div', { class: 'archive' + (t.archived ? ' on' : '') }, archiveBox(t),
+    h('div', { class: 'archive-text' },
+      h('span', { class: 'archive-label' }, 'تم الأرشفة'),
+      t.archived ? h('span', { class: 'archive-who' }, `${t.archived_by_name || '—'} · ${isolate(fmtDate(t.archived_at) + ' ' + fmtTime(t.archived_at))}`) : null));
+}
 
 function taskCard(t, i, enter) {
   const desc = h('p', { class: 'task-desc', dir: 'auto' }, t.description);
@@ -463,13 +550,15 @@ function taskCard(t, i, enter) {
     h('div', { class: 'task-main' },
       desc,
       h('div', { class: 'task-tags' },
-        h('span', { class: 'tag' + (t.assigned_to ? ' tag-accent' : '') }, assignedLabel(t)),
-        t.completed ? h('span', { class: 'tag tag-ok' }, 'تمت') : h('span', { class: 'tag tag-wait' }, 'قيد التنفيذ'))),
+        h('span', { class: 'tag tag-accent' }, icon(t.assigned_to ? 'user' : 'users'), assignedLabel(t)),
+        t.completed ? h('span', { class: 'tag tag-ok' }, icon('check'), 'تمت') : h('span', { class: 'tag tag-wait' }, icon('clock'), 'قيد التنفيذ'))),
     isAdmin() ? h('button', { class: 'icon-btn sm ghost', type: 'button', 'aria-label': 'خيارات المهمة', onclick: (e) => { e.stopPropagation(); taskMenu(t); } }, icon('more')) : null),
   h('div', { class: 'task-meta' },
-    metaCell('اسم المستخدم', t.completed_by_name || '—', 'm-user'),
-    metaCell('التاريخ', fmtDate(t.completed_at), 'm-date'),
-    metaCell('التوقيت', fmtTime(t.completed_at), 'm-time')));
+    dtCell('أُنشئت', openedAt(t), 'm-open'),
+    dtCell('اكتملت', t.completed_at, 'm-done'),
+    metaCell('اسم المستخدم', t.completed_by_name || '—', 'm-user' + (t.completed_by_name ? '' : ' empty'))),
+  folderRow(t),
+  archiveRow(t));
 
   // long descriptions: tap to expand
   requestAnimationFrame(() => {
@@ -481,6 +570,10 @@ function taskCard(t, i, enter) {
   return card;
 }
 
+function dtTd(iso) {
+  return h('td', null, iso ? h('span', { class: 'dt' }, h('b', null, fmtDate(iso)), h('span', null, fmtTime(iso))) : '—');
+}
+
 function taskTable(list) {
   const rows = list.map((t) => h('tr', { class: t.completed ? 'done' : '' },
     h('td', { class: 'c-task' }, h('div', { class: 'cell-task' },
@@ -488,20 +581,26 @@ function taskTable(list) {
       isAdmin() ? h('button', { class: 'icon-btn xs ghost', type: 'button', 'aria-label': 'خيارات المهمة', onclick: () => taskMenu(t) }, icon('more')) : null)),
     h('td', { class: 'c-check' }, checkbox(t)),
     h('td', null, t.completed_by_name || '—'),
-    h('td', { class: 'num' }, fmtDate(t.completed_at)),
-    h('td', { class: 'num' }, fmtTime(t.completed_at))));
+    dtTd(openedAt(t)),
+    dtTd(t.completed_at),
+    h('td', { class: 'c-folder' }, t.folder_path
+      ? h('span', { class: 'folder-path' }, t.folder_path)
+      : (canSetFolder(t) ? h('button', { class: 'link-btn', type: 'button', onclick: () => folderEditor(t) }, 'إضافة') : '—')),
+    h('td', null, h('div', { class: 'cell-archive' }, archiveBox(t), t.archived ? h('span', { class: 'archive-who' }, t.archived_by_name || '') : null))));
   return h('div', { class: 'table-wrap card' },
     h('table', { class: 'tbl' },
-      h('thead', null, h('tr', null, h('th', null, 'المهمة'), h('th', null, 'تم'), h('th', null, 'اسم المستخدم'), h('th', null, 'التاريخ'), h('th', null, 'التوقيت'))),
+      h('thead', null, h('tr', null, ['المهمة', 'تم', 'اسم المستخدم', 'الإنشاء', 'الإنجاز', 'مسار الفولدر', 'تم الأرشفة'].map((x) => h('th', null, x)))),
       h('tbody', null, rows)));
 }
 
 async function taskMenu(t) {
   const v = await actionSheet([
     { value: 'edit', label: 'تعديل المهمة', icon: 'edit' },
+    { value: 'folder', label: t.folder_path ? 'تعديل مسار الفولدر' : 'إضافة مسار الفولدر', icon: 'folder' },
     { value: 'delete', label: 'حذف المهمة', icon: 'trash', danger: true },
   ]);
   if (v === 'edit') taskEditor(t);
+  if (v === 'folder') folderEditor(t);
   if (v === 'delete') {
     const ok = await confirmDialog({ title: 'حذف المهمة؟', message: 'ستُحذف المهمة نهائياً، ويبقى أثرها في السجل.', confirmText: 'حذف', danger: true });
     if (!ok) return;
@@ -525,25 +624,33 @@ function userOptions(selected, { allLabel = 'كل المستخدمين', onlyAct
 function taskEditor(t) {
   const editing = !!t;
   const desc = field({ id: 'task-desc', label: 'وصف المهمة', multiline: true, value: t ? t.description : '', placeholder: 'اكتب المطلوب بالتفصيل…', maxlength: 2000, autofocus: true });
+  const when = t ? openedAt(t) : new Date().toISOString();
+  const date = field({ id: 'task-date', label: 'تاريخ الإنشاء', type: 'date', value: toDateInput(when) });
+  const time = field({ id: 'task-time', label: 'وقت الإنشاء', type: 'time', value: toTimeInput(when) });
+  const folder = field({ id: 'task-folder', label: 'مسار الفولدر (اختياري)', value: t ? t.folder_path || '' : '', dir: 'ltr', placeholder: 'D:\\Projects\\Client\\Logo', maxlength: 500 });
+  folder.input.classList.add('mono');
   const assign = userOptions(t ? t.assigned_to : '', { allLabel: 'الجميع' });
   assign.id = 'task-assign';
   const assignWrap = h('label', { class: 'field', for: 'task-assign' }, h('span', { class: 'field-label' }, 'مُسندة إلى'), assign);
   const err = h('p', { class: 'form-error', role: 'alert' });
-  const save = button(editing ? 'حفظ التعديلات' : 'إضافة المهمة', { block: true, type: 'submit' });
-  const form = h('form', { class: 'stack', novalidate: true }, desc.wrap, assignWrap, err);
-  const s = sheet({ title: editing ? 'تعديل المهمة' : 'مهمة جديدة', body: form, footer: save });
+  const save = button(editing ? 'حفظ التعديلات' : 'إضافة المهمة', { block: true, type: 'submit', iconName: editing ? 'check' : 'plus' });
+  const form = h('form', { class: 'stack', novalidate: true }, desc.wrap,
+    h('div', { class: 'row2' }, date.wrap, time.wrap), assignWrap, folder.wrap, err);
+  const s = sheet({ title: editing ? 'تعديل المهمة' : 'مهمة جديدة', body: form, footer: save, tall: true });
   const submit = async (e) => {
     e && e.preventDefault();
     const text = desc.input.value.trim();
     if (!text) { err.textContent = 'اكتب وصف المهمة'; desc.input.focus(); return; }
+    if (!date.input.value) { err.textContent = 'اختر تاريخ الإنشاء'; return; }
+    const fields = { description: text, assignedTo: assign.value, openedAt: fromInputs(date.input.value, time.input.value), folderPath: folder.input.value };
     setBusy(save, true);
     try {
       if (editing) {
-        const row = await api.updateTask(t.id, text, assign.value);
+        const row = await api.updateTask(t.id, fields);
         Object.assign(S.tasks.find((x) => x.id === t.id) || {}, row);
         toast('حُفظت التعديلات');
       } else {
-        const row = await api.createTask(text, assign.value);
+        const row = await api.createTask(fields);
         if (row && !S.tasks.some((x) => x.id === row.id)) S.tasks.unshift(row);
         toast('أُضيفت المهمة');
       }
@@ -620,23 +727,25 @@ function TasksScreen() {
 }
 
 // ====================================================================== dashboard
-function ring(pct) {
-  const r = 52, c = 2 * Math.PI * r;
-  const wrap = h('div', { class: 'ring' });
-  wrap.innerHTML = `<svg viewBox="0 0 128 128" aria-hidden="true">
-    <defs><linearGradient id="rg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style="stop-color:var(--ring-a)"/><stop offset="1" style="stop-color:var(--ring-b)"/></linearGradient></defs>
-    <circle cx="64" cy="64" r="${r}" class="ring-track"/>
-    <circle cx="64" cy="64" r="${r}" class="ring-val" stroke-dasharray="${c}" stroke-dashoffset="${c}"/></svg>`;
-  const val = wrap.querySelector('.ring-val');
-  const label = h('div', { class: 'ring-label' }, h('span', { class: 'ring-num' }, '0'), h('span', { class: 'ring-pct' }, '%'));
-  wrap.append(label);
+// Ruler gauge: tick marks lit up to the value, with a bright marker.
+function ruler(pct) {
+  const N = 41;
+  const ticks = h('div', { class: 'ruler-ticks' }, Array.from({ length: N }, () => h('i')));
+  const mark = h('span', { class: 'ruler-mark' });
+  const el = h('div', { class: 'ruler', role: 'img', 'aria-label': `نسبة الإنجاز ${Math.round(pct)}%` },
+    ticks, mark, h('div', { class: 'ruler-scale' }, h('span', null, '0%'), h('span', null, '50%'), h('span', null, '100%')));
   return {
-    el: wrap,
-    set(p) {
-      const off = c * (1 - p / 100);
-      if (reducedMotion()) val.style.transition = 'none';
-      requestAnimationFrame(() => { val.style.strokeDashoffset = String(off); });
-      countUp(label.firstChild, Math.round(p), 900);
+    el,
+    set(p, animate) {
+      const lit = Math.round((p / 100) * (N - 1));
+      if (!animate) mark.style.transition = 'none';
+      requestAnimationFrame(() => {
+        mark.style.right = `${p}%`;
+        [...ticks.children].forEach((t, i) => {
+          const on = i <= lit && p > 0;
+          if (animate) setTimeout(() => t.classList.toggle('lit', on), i * 18); else t.classList.toggle('lit', on);
+        });
+      });
     },
   };
 }
@@ -652,6 +761,9 @@ function activityText(a) {
     case 'task_deleted': return [who, ` حذف مهمة ${task}`];
     case 'task_completed': return [who, ` أنجز ${task}`];
     case 'task_reopened': return [who, ` أعاد فتح ${task}`];
+    case 'task_archived': return [who, ` سجّل أرشفة ${task}`];
+    case 'task_unarchived': return [who, ` ألغى أرشفة ${task}`];
+    case 'task_folder_set': return [who, d.folder_path ? ` حدّد مسار الفولدر لـ ${task}` : ` حذف مسار الفولدر من ${task}`];
     case 'user_created': return [who, ` أنشأ حساب ${uname}`];
     case 'user_updated':
       if (d.old_active !== undefined && d.old_active !== d.active) return [who, d.active ? ` أعاد تفعيل حساب ${uname}` : ` أوقف حساب ${uname}`];
@@ -666,6 +778,7 @@ function activityText(a) {
 const ACT_ICON = {
   task_created: ['plus', 'accent'], task_edited: ['edit', 'accent'], task_deleted: ['trash', 'danger'],
   task_completed: ['check', 'ok'], task_reopened: ['reopen', 'warn'], user_created: ['user', 'accent'],
+  task_archived: ['archive', 'ok'], task_unarchived: ['archive', 'warn'], task_folder_set: ['folder', 'accent'],
   user_updated: ['shield', 'accent'], user_deleted: ['trash', 'danger'], password_reset: ['key', 'warn'], password_changed: ['lock', 'ok'],
 };
 
@@ -673,9 +786,14 @@ function activityRow(a, i, enter) {
   const [ic, tone] = ACT_ICON[a.action] || ['clock', 'accent'];
   const [who, rest] = activityText(a);
   const d = a.details || {};
-  const extra = a.action === 'task_reopened' && d.previous_completed_at
-    ? h('p', { class: 'act-extra' }, `كانت منجزة بواسطة ${d.previous_completed_by_name || '—'} · ${isolate(fmtDate(d.previous_completed_at) + ' ' + fmtTime(d.previous_completed_at))}`)
-    : null;
+  let extra = null;
+  if (a.action === 'task_reopened' && d.previous_completed_at) {
+    extra = h('p', { class: 'act-extra' }, `كانت منجزة بواسطة ${d.previous_completed_by_name || '—'} · ${isolate(fmtDate(d.previous_completed_at) + ' ' + fmtTime(d.previous_completed_at))}`);
+  } else if (a.action === 'task_unarchived' && d.previous_archived_at) {
+    extra = h('p', { class: 'act-extra' }, `كانت مؤرشفة بواسطة ${d.previous_archived_by_name || '—'} · ${isolate(fmtDate(d.previous_archived_at) + ' ' + fmtTime(d.previous_archived_at))}`);
+  } else if (a.action === 'task_folder_set' && d.folder_path) {
+    extra = h('p', { class: 'act-extra', dir: 'ltr' }, d.folder_path);
+  }
   return h('div', { class: 'act' + (enter ? ' enter' : ''), style: enter ? { '--d': Math.min(i, 10) * 30 + 'ms' } : null },
     h('span', { class: 'act-ic ' + tone }, icon(ic)),
     h('div', { class: 'act-body' }, h('p', { class: 'act-text' }, h('b', null, who), rest), extra),
@@ -683,47 +801,64 @@ function activityRow(a, i, enter) {
 }
 
 function HomeScreen() {
-  let host, mounted = false;
+  let host, pills, mounted = false;
   return {
     add: () => taskEditor(null),
     mount(page) {
       const hr = new Date().getHours();
-      const greet = hr < 12 ? 'صباح الخير' : 'مساء الخير';
-      page.append(largeTitle(`${greet}، ${nameOf(S.me)}`, fmtDate(new Date().toISOString())));
+      pills = h('div', { class: 'greet-pills' });
+      page.append(
+        h('div', { class: 'greet' }, avatar(S.me, 48),
+          h('div', { class: 'greet-text' },
+            h('span', { class: 'greet-hi' }, hr < 12 ? 'صباح الخير' : 'مساء الخير'),
+            h('span', { class: 'greet-name' }, nameOf(S.me)))),
+        pills);
       host = h('div', { class: 'dash' });
       page.append(host);
     },
     update() {
       if (!host) return;
-      if (S.status === 'loading' && !S.tasks.length) { host.replaceChildren(h('div', { class: 'card sk-hero' }, h('span', { class: 'sk sk-ring' }), h('div', { class: 'sk-col' }, h('span', { class: 'sk sk-line w70' }), h('span', { class: 'sk sk-line w45' }))), skeletonCards(2)); return; }
-      if (S.status === 'error' && !S.tasks.length) { host.replaceChildren(errorBlock()); return; }
       const total = S.tasks.length;
       const done = S.tasks.filter((t) => t.completed).length;
+      const archived = S.tasks.filter((t) => t.archived).length;
       const pending = total - done;
       const activeUsers = S.profiles.filter((p) => p.active).length;
+      pills.replaceChildren(
+        h('span', { class: 'tag' }, icon('calendar'), isolate(fmtDate(new Date().toISOString()))),
+        h('span', { class: 'tag' }, icon('users'), `${activeUsers} نشط`),
+        h('span', { class: 'tag' }, icon('archive'), `${archived} مؤرشفة`));
+      if (S.status === 'loading' && !S.tasks.length) {
+        host.replaceChildren(h('div', { class: 'card sk-hero' }, h('span', { class: 'sk sk-line w45' }), h('span', { class: 'sk sk-ruler' })), skeletonCards(2));
+        return;
+      }
+      if (S.status === 'error' && !S.tasks.length) { host.replaceChildren(errorBlock()); return; }
       const pct = total ? (done / total) * 100 : 0;
       const enter = !mounted && !reducedMotion();
 
-      const r = ring(pct);
+      const g = ruler(pct);
+      const num = h('b', null, '0');
       const hero = h('section', { class: 'card hero' + (enter ? ' enter' : '') },
-        r.el,
-        h('div', { class: 'hero-text' },
-          h('p', { class: 'eyebrow' }, 'نسبة الإنجاز'),
-          h('p', { class: 'hero-big' }, total ? `${done} من ${total} منجزة` : 'لا توجد مهام بعد'),
-          h('p', { class: 'hero-sub' }, pending ? `${tasksN(pending)} قيد التنفيذ` : (total ? 'أُنجزت كل المهام' : 'أضف مهمة لتبدأ المتابعة'))));
+        h('div', { class: 'hero-head' },
+          h('div', null,
+            h('p', { class: 'hero-title' }, 'نسبة الإنجاز'),
+            h('p', { class: 'hero-sub' }, total ? `${done} من ${total} منجزة · ${tasksN(pending)} قيد التنفيذ` : 'أضف مهمة لتبدأ المتابعة')),
+          h('div', { class: 'hero-num' }, num, h('span', null, '%'))),
+        g.el);
 
-      const stat = (label, value, ic, tone, i) => {
-        const num = h('span', { class: 'stat-num num' }, String(value));
-        const el = h('div', { class: 'card stat' + (enter ? ' enter' : ''), style: enter ? { '--d': (i + 1) * 50 + 'ms' } : null },
-          h('span', { class: 'stat-ic ' + tone }, icon(ic)), num, h('span', { class: 'stat-label' }, label));
-        if (enter) { num.textContent = '0'; countUp(num, value); } else num.dataset.v = String(value);
+      const stat = (label, value, ic, tone, i, onGo) => {
+        const n = h('span', { class: 'stat-num num' }, String(value));
+        const el = h('button', { class: 'card stat' + (enter ? ' enter' : ''), type: 'button', onclick: onGo, style: enter ? { '--d': (i + 1) * 50 + 'ms' } : null },
+          h('span', { class: 'stat-go', 'aria-hidden': 'true' }, icon('expand')),
+          h('span', { class: 'stat-ic ' + tone }, icon(ic)), n, h('span', { class: 'stat-label' }, label));
+        if (enter) { n.textContent = '0'; countUp(n, value); } else n.dataset.v = String(value);
         return el;
       };
+      const openTasks = (status) => () => { S.filter.status = status; go('tasks'); };
       const grid = h('section', { class: 'stats' },
-        stat('إجمالي المهام', total, 'tasks', 'accent', 0),
-        stat('المكتملة', done, 'check', 'ok', 1),
-        stat('قيد التنفيذ', pending, 'clock', 'warn', 2),
-        stat('المستخدمون النشطون', activeUsers, 'users', 'accent', 3));
+        stat('إجمالي المهام', total, 'tasks', 'accent', 0, openTasks('all')),
+        stat('المكتملة', done, 'check', 'ok', 1, openTasks('done')),
+        stat('قيد التنفيذ', pending, 'clock', 'warn', 2, openTasks('pending')),
+        stat('المستخدمون النشطون', activeUsers, 'users', 'accent', 3, () => go('users')));
 
       // who completed what
       const counts = new Map();
@@ -735,7 +870,7 @@ function HomeScreen() {
         leaders.length ? h('div', { class: 'leaders' }, leaders.map(([id, n]) => {
           const p = profileById(id);
           const name = p ? nameOf(p) : (S.tasks.find((t) => t.completed_by === id) || {}).completed_by_name || '—';
-          return h('div', { class: 'leader' }, avatar(p || { id, full_name: name }, 32),
+          return h('div', { class: 'leader' }, avatar(p || { id, full_name: name }, 34),
             h('div', { class: 'leader-main' }, h('div', { class: 'leader-top' }, h('span', { class: 'leader-name' }, name), h('span', { class: 'leader-n' }, tasksN(n))),
               h('div', { class: 'bar' }, h('span', { style: { width: (n / max) * 100 + '%' } }))));
         })) : h('p', { class: 'muted pad' }, 'ستظهر هنا أسماء من أنجزوا مهاماً.'));
@@ -747,7 +882,8 @@ function HomeScreen() {
         recent.length ? h('div', { class: 'acts' }, recent.map((a) => activityRow(a))) : h('p', { class: 'muted pad' }, 'لا يوجد نشاط بعد.'));
 
       host.replaceChildren(hero, grid, leaderBox, recentBox);
-      r.set(pct);
+      g.set(pct, enter);
+      if (enter) countUp(num, Math.round(pct), 900); else num.textContent = String(Math.round(pct));
       mounted = true;
     },
   };
@@ -787,7 +923,11 @@ function inviteText(name, username, password) {
     `مرحباً ${name || username}،`,
     `تم إنشاء حسابك في تطبيق «${APP_NAME}».`,
     '',
-    url ? `الرابط: ${url}` : null,
+    'تحميل التطبيق (أندرويد):',
+    APK_URL,
+    url ? 'أو افتحه من المتصفح:' : null,
+    url || null,
+    '',
     `اسم المستخدم: ${username}`,
     `كلمة المرور المؤقتة: ${password}`,
     '',
@@ -973,8 +1113,8 @@ function openProfile() {
     try { await api.updateMyName(nameF.input.value.trim()); S.me.full_name = nameF.input.value.trim(); toast('حُفظ الاسم'); loadAll(true); pmName.textContent = nameOf(S.me); }
     catch (ex) { toast(errText(ex), 'error'); }
   });
-  const theme = segmented([{ value: 'auto', label: 'تلقائي' }, { value: 'light', label: 'فاتح' }, { value: 'dark', label: 'داكن' }],
-    pref('theme', 'auto'), (v) => { setPref('theme', v); applyTheme(v); }, { id: 'pf-theme' });
+  const theme = segmented([{ value: 'dark', label: 'داكن' }, { value: 'light', label: 'فاتح' }],
+    pref('theme', 'dark') === 'light' ? 'light' : 'dark', (v) => { setPref('theme', v); applyTheme(v); }, { id: 'pf-theme' });
   const pwBtn = h('button', { class: 'row-btn', type: 'button' }, icon('lock'), h('span', null, 'تغيير كلمة المرور'), icon('chevron', 'row-chev'));
   const outBtn = h('button', { class: 'row-btn danger', type: 'button' }, icon('logout'), h('span', null, 'تسجيل الخروج'));
   const pmName = h('p', { class: 'pm-name lg' }, nameOf(p));

@@ -73,3 +73,16 @@ select 'final' t, action, actor_name from public.activity order by id;
 reset role;
 select 'auth users left' t, count(*) from auth.users;
 select 'banned' t, count(*) from auth.users where banned_until is not null;
+
+-- ===== update 1: dates, folder, archive
+reset role; select pg_temp.as_user('admin'); set role authenticated;
+insert into public.tasks (description, opened_at, folder_path) values ('dated', '2026-11-01 09:30+02', 'D:\Work\Client\Logo');
+update public.tasks set opened_at = '2026-11-02 10:00+02' where description = 'dated';
+update public.tasks set archived = true where description = 'dated';                  -- expect permission denied
+select pg_temp.as_user('sara');
+select (public.set_task_folder((select id from public.tasks where description='dated'), '  \\server\share\job  ')).folder_path as sara_folder;
+select (public.set_task_archived((select id from public.tasks where description='dated'), true)).archived_by_name as archived_by;
+select public.set_task_archived((select id from public.tasks where description='dated'), true);      -- expect already_archived
+reset role; select pg_temp.as_user('admin'); set role authenticated;
+select (public.set_task_archived((select id from public.tasks where description='dated'), false)).archived as still_archived;
+select 'u1 history' t, action, actor_name from public.activity where task_text = 'dated' order by id;

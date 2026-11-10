@@ -11,5 +11,8 @@ export const USER_EMAIL_DOMAIN = 'users.tasks.local';
 // Filled in once the app is published on GitHub Pages.
 export const APP_URL = 'https://ibrahimsalah55155-web.github.io/task-app/';
 
+// Direct download of the latest Android build (GitHub release).
+export const APK_URL = 'https://github.com/ibrahimsalah55155-web/task-app/releases/download/apk-latest/injaz.apk';
+
 export const APP_NAME = 'إنجاز';
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '1.1.0';

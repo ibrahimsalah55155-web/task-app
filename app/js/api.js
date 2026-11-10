@@ -3,7 +3,7 @@ import { SUPABASE_URL, SUPABASE_KEY, USER_EMAIL_DOMAIN } from './config.js';
 const KNOWN = new Set([
   'not_allowed', 'task_not_found', 'already_completed', 'weak_password', 'same_password',
   'wrong_password', 'username_taken', 'invalid_username', 'invalid_role',
-  'cannot_change_self', 'user_not_found',
+  'cannot_change_self', 'user_not_found', 'already_archived', 'path_too_long',
 ]);
 
 export function toError(e) {
@@ -26,6 +26,13 @@ async function run(promise) {
   if (res && res.error) throw toError(res.error);
   return res ? res.data : undefined;
 }
+
+const taskRow = (f) => ({
+  description: f.description,
+  assigned_to: f.assignedTo || null,
+  opened_at: f.openedAt || new Date().toISOString(),
+  folder_path: (f.folderPath || '').trim() || null,
+});
 
 export const usernameToEmail = (u) => `${String(u).trim().toLowerCase()}@${USER_EMAIL_DOMAIN}`;
 
@@ -61,10 +68,11 @@ export function createApi() {
     listActivity: (limit = 300) =>
       run(sb.from('activity').select('*').order('created_at', { ascending: false }).limit(limit)),
 
-    createTask: (description, assignedTo) =>
-      run(sb.from('tasks').insert({ description, assigned_to: assignedTo || null }).select().single()),
-    updateTask: (id, description, assignedTo) =>
-      run(sb.from('tasks').update({ description, assigned_to: assignedTo || null }).eq('id', id).select().single()),
+    // fields: { description, assignedTo, openedAt (ISO), folderPath }
+    createTask: (f) => run(sb.from('tasks').insert(taskRow(f)).select().single()),
+    updateTask: (id, f) => run(sb.from('tasks').update(taskRow(f)).eq('id', id).select().single()),
+    setTaskArchived: (id, archived) => run(sb.rpc('set_task_archived', { p_task_id: id, p_archived: archived })),
+    setTaskFolder: (id, path) => run(sb.rpc('set_task_folder', { p_task_id: id, p_path: path })),
     deleteTask: (id) => run(sb.from('tasks').delete().eq('id', id)),
     completeTask: (id) => run(sb.rpc('complete_task', { p_task_id: id })),
     reopenTask: (id) => run(sb.rpc('reopen_task', { p_task_id: id })),

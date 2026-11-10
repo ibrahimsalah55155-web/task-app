@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>إنجاز</title>
   <meta name="description" content="متابعة مهام الفريق وإنجازها">
-  <meta name="theme-color" content="#F3F6FA">
-  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#0C0D0F">
+  <meta name="color-scheme" content="dark light">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="إنجاز">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
@@ -19,7 +19,8 @@
   <link rel="stylesheet" href="css/app.css">
   <script>
     // Apply the saved theme before first paint.
-    try { var t = localStorage.getItem('injaz.theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+    var t = 'dark'; try { if (localStorage.getItem('injaz.theme') === 'light') t = 'light'; } catch (e) {}
+    document.documentElement.setAttribute('data-theme', t);
   </script>
 </head>
 <body>

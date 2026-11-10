@@ -23,15 +23,37 @@ create table if not exists public.profiles (
 create table if not exists public.tasks (
   id                bigint generated always as identity primary key,
   description       text not null check (length(btrim(description)) between 1 and 2000),
+  opened_at         timestamptz not null default now(),   -- creation date/time the admin picks
   assigned_to       uuid references public.profiles(id) on delete set null,   -- null = everyone
   completed         boolean not null default false,
   completed_by      uuid references public.profiles(id) on delete set null,
   completed_by_name text,
   completed_at      timestamptz,
+  folder_path       text check (folder_path is null or length(folder_path) <= 500),   -- where the work files live
+  archived          boolean not null default false,
+  archived_by       uuid references public.profiles(id) on delete set null,
+  archived_by_name  text,
+  archived_at       timestamptz,
   created_by        uuid default auth.uid() references public.profiles(id) on delete set null,
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
 );
+-- Projects set up before these columns existed get them here.
+-- opened_at starts as the original creation time.
+do $$
+begin
+  if not exists (select 1 from information_schema.columns
+                 where table_schema = 'public' and table_name = 'tasks' and column_name = 'opened_at') then
+    alter table public.tasks add column opened_at timestamptz not null default now();
+    update public.tasks set opened_at = created_at;
+  end if;
+end $$;
+alter table public.tasks add column if not exists folder_path text check (folder_path is null or length(folder_path) <= 500);
+alter table public.tasks add column if not exists archived boolean not null default false;
+alter table public.tasks add column if not exists archived_by uuid references public.profiles(id) on delete set null;
+alter table public.tasks add column if not exists archived_by_name text;
+alter table public.tasks add column if not exists archived_at timestamptz;
+
 create index if not exists tasks_assigned_idx on public.tasks (assigned_to);
 create index if not exists tasks_completed_at_idx on public.tasks (completed_at);
 
@@ -156,13 +178,31 @@ begin
             jsonb_build_object('previous_completed_by', old.completed_by,
                                'previous_completed_by_name', old.completed_by_name,
                                'previous_completed_at', old.completed_at));
+  elsif new.archived and not old.archived then
+    insert into public.activity (action, task_id, task_text, actor_id, actor_name, details)
+    values ('task_archived', new.id, new.description, new.archived_by, new.archived_by_name,
+            jsonb_build_object('archived_at', new.archived_at));
+  elsif old.archived and not new.archived then
+    insert into public.activity (action, task_id, task_text, actor_id, actor_name, details)
+    values ('task_unarchived', new.id, new.description, me.id, who,
+            jsonb_build_object('previous_archived_by_name', old.archived_by_name,
+                               'previous_archived_at', old.archived_at));
   elsif new.description is distinct from old.description
-        or new.assigned_to is distinct from old.assigned_to then
+        or new.assigned_to is distinct from old.assigned_to
+        or new.opened_at is distinct from old.opened_at then
     insert into public.activity (action, task_id, task_text, actor_id, actor_name, details)
     values ('task_edited', new.id, new.description, me.id, who,
             jsonb_build_object('old_description', old.description,
                                'old_assigned_to', old.assigned_to,
-                               'assigned_to', new.assigned_to));
+                               'assigned_to', new.assigned_to,
+                               'old_opened_at', old.opened_at,
+                               'opened_at', new.opened_at,
+                               'old_folder_path', old.folder_path,
+                               'folder_path', new.folder_path));
+  elsif new.folder_path is distinct from old.folder_path then
+    insert into public.activity (action, task_id, task_text, actor_id, actor_name, details)
+    values ('task_folder_set', new.id, new.description, me.id, who,
+            jsonb_build_object('old_folder_path', old.folder_path, 'folder_path', new.folder_path));
   end if;
   return new;
 end $$;
@@ -213,12 +253,12 @@ create policy activity_read on public.activity for select to authenticated
 revoke all on public.profiles, public.tasks, public.activity from anon;
 revoke insert, update, delete on public.profiles from authenticated;
 revoke insert, update, delete on public.activity from authenticated;
--- Admins edit only the task text and who it is for. Completion fields are
+-- Admins edit only the task text, its creation date/time and who it is for. Completion fields are
 -- set by complete_task / reopen_task, so nobody can sign a task as someone else.
 revoke insert, update on public.tasks from authenticated;
 grant select, delete on public.tasks to authenticated;
-grant insert (description, assigned_to) on public.tasks to authenticated;
-grant update (description, assigned_to) on public.tasks to authenticated;
+grant insert (description, assigned_to, opened_at, folder_path) on public.tasks to authenticated;
+grant update (description, assigned_to, opened_at, folder_path) on public.tasks to authenticated;
 grant select on public.profiles, public.activity to authenticated;
 
 -- ---------------------------------------------------------------------
@@ -269,6 +309,57 @@ begin
      set completed = false, completed_by = null, completed_by_name = null, completed_at = null
    where id = p_task_id
   returning * into t;
+  return t;
+end $$;
+
+-- Anyone who can work on a task can tick "archived" and record where its files are.
+create or replace function public.set_task_archived(p_task_id bigint, p_archived boolean)
+returns public.tasks
+language plpgsql security definer set search_path = public
+as $$
+declare
+  me public.profiles := public._me();
+  t  public.tasks;
+begin
+  if me.id is null or not me.active then raise exception 'not_allowed'; end if;
+  select * into t from public.tasks where id = p_task_id for update;
+  if t.id is null then raise exception 'task_not_found'; end if;
+  if me.role <> 'admin' and t.assigned_to is not null and t.assigned_to <> me.id then
+    raise exception 'not_allowed';
+  end if;
+  if p_archived then
+    if t.archived then raise exception 'already_archived'; end if;
+    update public.tasks
+       set archived = true, archived_by = me.id,
+           archived_by_name = public.display_name(me), archived_at = now()
+     where id = p_task_id returning * into t;
+  else
+    if not t.archived then return t; end if;
+    if me.role <> 'admin' and t.archived_by is distinct from me.id then raise exception 'not_allowed'; end if;
+    update public.tasks
+       set archived = false, archived_by = null, archived_by_name = null, archived_at = null
+     where id = p_task_id returning * into t;
+  end if;
+  return t;
+end $$;
+
+create or replace function public.set_task_folder(p_task_id bigint, p_path text)
+returns public.tasks
+language plpgsql security definer set search_path = public
+as $$
+declare
+  me public.profiles := public._me();
+  t  public.tasks;
+begin
+  if me.id is null or not me.active then raise exception 'not_allowed'; end if;
+  select * into t from public.tasks where id = p_task_id for update;
+  if t.id is null then raise exception 'task_not_found'; end if;
+  if me.role <> 'admin' and t.assigned_to is not null and t.assigned_to <> me.id then
+    raise exception 'not_allowed';
+  end if;
+  p_path := nullif(btrim(coalesce(p_path, '')), '');
+  if length(p_path) > 500 then raise exception 'path_too_long'; end if;
+  update public.tasks set folder_path = p_path where id = p_task_id returning * into t;
   return t;
 end $$;
 
@@ -409,6 +500,8 @@ revoke all on function public.tasks_log() from public, anon, authenticated;
 revoke all on function public.complete_task(bigint)                 from public, anon;
 revoke all on function public.reopen_task(bigint)                   from public, anon;
 revoke all on function public.change_my_password(text, text)        from public, anon;
+revoke all on function public.set_task_archived(bigint, boolean)     from public, anon;
+revoke all on function public.set_task_folder(bigint, text)          from public, anon;
 revoke all on function public.update_my_name(text)                  from public, anon;
 revoke all on function public.admin_create_user(text, text, text, text) from public, anon;
 revoke all on function public.admin_update_user(uuid, text, text, boolean) from public, anon;
@@ -416,6 +509,7 @@ revoke all on function public.admin_reset_password(uuid, text)      from public,
 revoke all on function public.admin_delete_user(uuid)               from public, anon;
 grant execute on function public._me(), public.is_admin(), public.is_active_user(),
   public.complete_task(bigint), public.reopen_task(bigint),
+  public.set_task_archived(bigint, boolean), public.set_task_folder(bigint, text),
   public.change_my_password(text, text), public.update_my_name(text),
   public.admin_create_user(text, text, text, text),
   public.admin_update_user(uuid, text, text, boolean),

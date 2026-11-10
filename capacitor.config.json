@@ -3,7 +3,7 @@
   "appName": "إنجاز",
   "webDir": "app",
   "android": {
-    "backgroundColor": "#F3F6FA"
+    "backgroundColor": "#0C0D0F"
   },
   "plugins": {
     "SystemBars": {

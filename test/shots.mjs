@@ -57,6 +57,10 @@ await p.keyboard.press('Escape');
 await new Promise((r) => setTimeout(r, 400));
 await tap(p, '.bar-actions .icon-btn.accent');
 await snap(p, '11-new-task');
+await p.keyboard.press('Escape');
+await new Promise((r) => setTimeout(r, 400));
+await p.evaluate(() => document.querySelector('.folder-add').click());
+await snap(p, '11b-folder');
 await p.close();
 
 // 4 users

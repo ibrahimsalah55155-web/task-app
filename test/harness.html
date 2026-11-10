@@ -12,7 +12,7 @@
     (function () {
       var q = new URLSearchParams(location.search);
       var as = q.get('as'); // admin | user | null (signed out)
-      var theme = q.get('theme'); if (theme) document.documentElement.setAttribute('data-theme', theme);
+
       var empty = q.get('empty') === '1';
       var now = Date.now(), M = 60000;
       var ago = function (m) { return new Date(now - m * M).toISOString(); };
@@ -23,14 +23,15 @@
         { id: 'u3', username: 'mona', full_name: 'منى إبراهيم', role: 'user', active: false, must_change_password: false, created_at: ago(6000) },
       ];
       var T = empty ? [] : [
-        { id: 1, description: 'مراجعة تصميم الصفحة الرئيسية للتطبيق وإرسال الملاحظات للفريق', assigned_to: null, completed: true, completed_by: 'u1', completed_by_name: 'سارة محمود', completed_at: ago(42), created_at: ago(600) },
-        { id: 2, description: 'تجهيز عرض تقديمي لاجتماع العميل يوم الخميس\nيشمل: الأهداف، الجدول الزمني، والميزانية المقترحة', assigned_to: 'u2', completed: false, created_at: ago(300) },
+        { id: 1, description: 'مراجعة تصميم الصفحة الرئيسية للتطبيق وإرسال الملاحظات للفريق', assigned_to: null, completed: true, completed_by: 'u1', completed_by_name: 'سارة محمود', completed_at: ago(42), created_at: ago(600), opened_at: ago(600), folder_path: 'D:\\Projects\\Injaz\\Home-Review', archived: true, archived_by: 'u1', archived_by_name: 'سارة محمود', archived_at: ago(30) },
+        { id: 2, description: 'تجهيز عرض تقديمي لاجتماع العميل يوم الخميس\nيشمل: الأهداف، الجدول الزمني، والميزانية المقترحة', assigned_to: 'u2', completed: false, created_at: ago(300), opened_at: ago(300), folder_path: '\\\\server\\clients\\Nile\\Pitch-2026' },
         { id: 3, description: 'تحديث أيقونات لوحة التحكم بنفس سُمك الخط', assigned_to: null, completed: false, created_at: ago(200) },
         { id: 4, description: 'تصدير ملفات الشعار بكل المقاسات', assigned_to: 'u1', completed: true, completed_by: 'u1', completed_by_name: 'سارة محمود', completed_at: ago(1500), created_at: ago(2000) },
-        { id: 5, description: 'كتابة نصوص شاشة تسجيل الدخول باللغة العربية', assigned_to: null, completed: true, completed_by: 'u2', completed_by_name: 'عمر خالد', completed_at: ago(180), created_at: ago(900) },
+        { id: 5, description: 'كتابة نصوص شاشة تسجيل الدخول باللغة العربية', assigned_to: null, completed: true, completed_by: 'u2', completed_by_name: 'عمر خالد', completed_at: ago(180), created_at: ago(900), opened_at: ago(900), folder_path: 'Drive/Injaz/Copy/Login' },
         { id: 6, description: 'اختبار التطبيق على أجهزة أندرويد بأحجام شاشات مختلفة والتأكد من عدم تداخل العناصر', assigned_to: null, completed: false, created_at: ago(60) },
       ];
       var A = empty ? [] : [
+        { id: 10, action: 'task_archived', task_id: 1, task_text: T[0].description, actor_id: 'u1', actor_name: 'سارة محمود', created_at: ago(30), details: {} },
         { id: 9, action: 'task_completed', task_id: 1, task_text: T[0].description, actor_id: 'u1', actor_name: 'سارة محمود', created_at: ago(42), details: {} },
         { id: 8, action: 'task_created', task_id: 6, task_text: T[5].description, actor_id: 'a1', actor_name: 'أحمد سمير', created_at: ago(60), details: {} },
         { id: 7, action: 'task_reopened', task_id: 3, task_text: T[2].description, actor_id: 'a1', actor_name: 'أحمد سمير', created_at: ago(100), details: { previous_completed_by_name: 'عمر خالد', previous_completed_at: ago(160) } },
@@ -54,8 +55,10 @@
         listTasks: function () { return delay(JSON.parse(JSON.stringify(vis())), q.get('slow') ? 4000 : 300); },
         listProfiles: function () { return delay(JSON.parse(JSON.stringify(P))); },
         listActivity: function () { return delay(JSON.parse(JSON.stringify(me.role === 'admin' ? A : A.filter(function (a) { return a.actor_id === me.id; })))); },
-        createTask: function (d, a) { var t = { id: nid++, description: d, assigned_to: a || null, completed: false, created_at: new Date().toISOString() }; T.unshift(t); return delay(JSON.parse(JSON.stringify(t))); },
-        updateTask: function (id, d, a) { var t = T.find(function (x) { return x.id === id; }); t.description = d; t.assigned_to = a || null; return delay(JSON.parse(JSON.stringify(t))); },
+        createTask: function (f) { var t = { id: nid++, description: f.description, assigned_to: f.assignedTo || null, opened_at: f.openedAt, folder_path: (f.folderPath || '').trim() || null, completed: false, archived: false, created_at: new Date().toISOString() }; T.unshift(t); return delay(JSON.parse(JSON.stringify(t))); },
+        updateTask: function (id, f) { var t = T.find(function (x) { return x.id === id; }); Object.assign(t, { description: f.description, assigned_to: f.assignedTo || null, opened_at: f.openedAt, folder_path: (f.folderPath || '').trim() || null }); return delay(JSON.parse(JSON.stringify(t))); },
+        setTaskArchived: function (id, v) { var t = T.find(function (x) { return x.id === id; }); Object.assign(t, v ? { archived: true, archived_by: me.id, archived_by_name: me.full_name, archived_at: new Date().toISOString() } : { archived: false, archived_by: null, archived_by_name: null, archived_at: null }); return delay(JSON.parse(JSON.stringify(t)), 300); },
+        setTaskFolder: function (id, p) { var t = T.find(function (x) { return x.id === id; }); t.folder_path = (p || '').trim() || null; return delay(JSON.parse(JSON.stringify(t))); },
         deleteTask: function (id) { var i = T.findIndex(function (x) { return x.id === id; }); T.splice(i, 1); return delay(); },
         completeTask: function (id) { var t = T.find(function (x) { return x.id === id; }); Object.assign(t, { completed: true, completed_by: me.id, completed_by_name: me.full_name, completed_at: new Date().toISOString() }); return delay(JSON.parse(JSON.stringify(t)), 400); },
         reopenTask: function (id) { var t = T.find(function (x) { return x.id === id; }); Object.assign(t, { completed: false, completed_by: null, completed_by_name: null, completed_at: null }); return delay(JSON.parse(JSON.stringify(t))); },
@@ -67,7 +70,7 @@
         adminDeleteUser: function (id) { var i = P.findIndex(function (x) { return x.id === id; }); P.splice(i, 1); return delay(); },
         subscribe: function () { return function () {}; },
       };
-      try { localStorage.clear(); } catch (e) {}
+      try { localStorage.clear(); if (q.get('theme') === 'light') localStorage.setItem('injaz.theme', 'light'); } catch (e) {}
     })();
   </script>
 </head>

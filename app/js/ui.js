@@ -62,6 +62,13 @@ const P = {
   filter: '<path d="M4 6.5h16M7 12h10M10 17.5h4"/>',
   palette: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17" /><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" stroke="none"/>',
   power: '<path d="M12 3.5v8"/><path d="M7 6.5a7.5 7.5 0 1 0 10 0"/>',
+  folder: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
+  folderPlus: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/>',
+  archive: '<rect x="3.5" y="4.5" width="17" height="4.5" rx="1.5"/><path d="M5 9v8.5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4"/>',
+  expand: '<path d="M14 5h5v5M19 5l-7 7M10 19H5v-5"/>',
+  chevL: '<path d="m15 6-6 6 6 6"/>',
+  arrow: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
+  bolt: '<path d="M13 3 5 13.5h6L10 21l8-10.5h-6z"/>',
 };
 
 export function icon(name, cls = '') {
@@ -77,10 +84,10 @@ export function logoMark(size = 64) {
   const wrap = h('div', { class: 'logo-mark', style: { width: size + 'px', height: size + 'px' } });
   wrap.innerHTML = `<svg viewBox="0 0 64 64" aria-hidden="true">
     <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#8EC5FF"/><stop offset="1" stop-color="#2F6FEB"/></linearGradient></defs>
+      <stop offset="0" stop-color="#E4FF7A"/><stop offset="1" stop-color="#B5E01E"/></linearGradient></defs>
     <rect x="2" y="2" width="60" height="60" rx="18" fill="url(#lg)"/>
-    <rect x="2.5" y="2.5" width="59" height="59" rx="17.5" fill="none" stroke="rgba(255,255,255,.45)"/>
-    <path d="M19 33.5 28 42 45.5 23.5" fill="none" stroke="#fff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="2.5" y="2.5" width="59" height="59" rx="17.5" fill="none" stroke="rgba(255,255,255,.5)"/>
+    <path d="M19 33.5 28 42 45.5 23.5" fill="none" stroke="#10140A" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>`;
   return wrap;
 }
@@ -318,8 +325,32 @@ export function toggleSwitch(checked, onChange, label) {
 }
 
 export function button(label, { kind = 'primary', iconName, type = 'button', onclick, id, block = false } = {}) {
+  // Full-width primary buttons get the pill call-to-action look: icon disc + fading chevrons.
+  if (kind === 'primary' && block) {
+    return h('button', { class: 'btn primary block cta', type, onclick, id },
+      h('span', { class: 'cta-ic', 'aria-hidden': 'true' }, icon(iconName || 'arrow')),
+      h('span', { class: 'btn-label' }, label),
+      h('span', { class: 'cta-chev', 'aria-hidden': 'true' }, icon('chevL'), icon('chevL'), icon('chevL')),
+      h('span', { class: 'spinner', 'aria-hidden': 'true' }));
+  }
   return h('button', { class: `btn ${kind}${block ? ' block' : ''}`, type, onclick, id },
     iconName ? icon(iconName) : null, h('span', { class: 'btn-label' }, label), h('span', { class: 'spinner', 'aria-hidden': 'true' }));
+}
+
+// Value for <input type="date"> / <input type="time"> from an ISO time, in local time.
+export function toDateInput(iso) {
+  const d = iso ? new Date(iso) : new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+export function toTimeInput(iso) {
+  const d = iso ? new Date(iso) : new Date();
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+export function fromInputs(date, time) {
+  if (!date) return null;
+  const [y, m, d] = date.split('-').map(Number);
+  const [hh, mm] = (time || '00:00').split(':').map(Number);
+  return new Date(y, m - 1, d, hh || 0, mm || 0).toISOString();
 }
 export function setBusy(btn, busy) { btn.classList.toggle('busy', busy); btn.disabled = busy; }
 
@@ -361,7 +392,7 @@ export function initials(name) {
 }
 export function avatarHue(id) {
   let x = 0; for (const c of String(id || '')) x = (x * 31 + c.charCodeAt(0)) >>> 0;
-  return [212, 200, 224, 190, 236, 205][x % 6];
+  return [74, 92, 150, 42, 170, 60][x % 6];
 }
 export function avatar(profile, size = 40) {
   const name = profile ? (profile.full_name || profile.username) : '?';
