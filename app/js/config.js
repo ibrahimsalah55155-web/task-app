@@ -9,7 +9,7 @@ export const USER_EMAIL_DOMAIN = 'users.tasks.local';
 
 // Public address of the web app, used in account invitations.
 // Filled in once the app is published on GitHub Pages.
-export const APP_URL = '';
+export const APP_URL = 'https://ibrahimsalah55155-web.github.io/task-app/';
 
 export const APP_NAME = 'إنجاز';
 export const APP_VERSION = '1.0.0';
