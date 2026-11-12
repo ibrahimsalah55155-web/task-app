@@ -30,13 +30,15 @@ seq.frameW = 1080;
 seq.frameH = 1920;
 seq.end = SEQ_LEN;
 
+// buildFake() creates its own project; it must run BEFORE ours so the fake's
+// "current root bin" (where new subclips land) is our project's root.
+const fake = buildFake();
 const project = new FakeProject(seq);
 project.name = "Podcast EP12.prproj";
 project.path = `${DEMO_MEDIA}/Podcast EP12.prproj`;
 project.importLengthTicks = TPS * 6;
 for (const c of [...Object.values(cams), ...Object.values(mics)]) project.root.items.push(c);
 
-const fake = buildFake();
 const mod = fake.module as Record<string, unknown> & { Project: { getActiveProject: () => Promise<unknown> } };
 mod.Project = { getActiveProject: async () => project };
 mod.MogrtText = function MogrtText() {};
