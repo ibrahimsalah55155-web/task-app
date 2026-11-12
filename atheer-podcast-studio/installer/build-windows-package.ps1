@@ -94,8 +94,11 @@ $Asset = $Rel.assets | Where-Object { $_.name -match '^ffmpeg-n(\d+)\.(\d+)-late
 if (-not $Asset) { throw "No win64 LGPL FFmpeg build found in the latest BtbN release" }
 $FfZip = Join-Path $Work $Asset.name
 Invoke-WebRequest -Headers $Headers $Asset.browser_download_url -OutFile $FfZip
-$Sums = (Invoke-WebRequest -Headers $Headers ($Rel.assets | Where-Object name -eq "checksums.sha256").browser_download_url).Content
-$Expected = (($Sums -split "`n") | Where-Object { $_ -match [regex]::Escape($Asset.name) } | Select-Object -First 1).Split(" ")[0]
+$SumsFile = Join-Path $Work "checksums.sha256"
+Invoke-WebRequest -Headers $Headers ($Rel.assets | Where-Object name -eq "checksums.sha256").browser_download_url -OutFile $SumsFile
+$Line = Get-Content $SumsFile | Where-Object { $_ -match [regex]::Escape($Asset.name) } | Select-Object -First 1
+if (-not $Line) { throw "No checksum listed for $($Asset.name)" }
+$Expected = ($Line -split "\s+")[0].ToLower()
 $Actual = (Get-FileHash $FfZip -Algorithm SHA256).Hash.ToLower()
 if ($Expected -ne $Actual) { throw "FFmpeg checksum mismatch ($Actual vs $Expected)" }
 Write-Host "FFmpeg $($Asset.name) sha256 OK"
