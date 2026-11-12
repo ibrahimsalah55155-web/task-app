@@ -26,19 +26,22 @@ Target: **Windows x64, Premiere Pro 2026 (latest from Creative Cloud), single ma
 | Media inspection (TC, fps, VFR, audio, missing drive) | Built, tested outside Premiere | engine pytest + panel integration test |
 | Project reader, bins, marker (undoable) | Built, tested outside Premiere | `test/ppro.test.ts` |
 
-## Later phases
+## Production stages (0.3.0)
 
-| Capability | Status | Notes |
+All stages are built and tested outside Premiere (engine on real audio/media; panel on the fake
+Premiere that enforces Adobe's lock rules; end-to-end in the demo harness with the real engine).
+
+| Stage | Status | How |
 |---|---|---|
-| Waveform/timecode sync, drift, confidence | Planned (Phase 2) | |
-| Synced multitrack sequence build | Planned (Phase 2) | APIs exist |
+| 1 Sync & Build | Built, tested outside Premiere | Envelope + sample-accurate correlation, drift ppm, timecode cross-check; sequence from the first camera's settings, V1 Wide / V2 Host / V3 Guest, A1 Guest Mic / A2 Host Mic, camera audio kept but muted |
+| 2 Smart Silence Cut | Built, tested outside Premiere | Silero VAD per mic, presets, padding, retained pause, laughter/breath protection, review list, markers, cut engine |
+| 3 AI Auto Director | Built, tested outside Premiere | Per-mic activity with bleed handling, min shot, both→wide, hold on silence, cutaways; cut engine splits all cameras at the same frames and disables off-air pieces |
+| 4 AI Reels | Built, tested outside Premiere | Verbatim hooks + context/relevance scores; reel sequences via the cut engine; 9:16/1:1/4:5 frame + Motion reframing on the face (**Motion coordinate system to verify, QA P5-02**) |
+| 5 Captions | Built, tested outside Premiere; real Arabic ASR tested in CI | faster-whisper locally (model downloaded once), Arabic segmentation, editor, SRT, 4 styles as transparent stills placed at exact times |
+| 6 Motion Library | Built, tested outside Premiere | 6 templates rendered by the engine (ProRes 4444) |
+| 7 Export | Built, not run | EncoderManager queue/immediate with your .epr preset, only for selected sequences |
 | Premiere multicam source sequence | Blocked by Adobe API | Stacked tracks instead |
-| Silence removal across tracks | Planned (Phase 3) | Uses the cut engine |
-| Auto Director | Planned (Phase 4) | Cut engine `splitAt` + `createSetDisabledAction` |
-| Reels | Planned (Phase 5) | |
-| Arabic captions | Planned (Phase 6) | Local Whisper; SRT path to test |
-| MOGRT insert at playhead + text editing | Planned (Phase 7) | `MogrtText` available on Premiere 27 (user has latest) |
-| Batch export via AME | Planned (Phase 8) | |
+| Native caption track from text | Blocked by Adobe API | SRT export + styled stills on a video track |
 
 ## Premiere versions
 

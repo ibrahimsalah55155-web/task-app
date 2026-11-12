@@ -22,7 +22,11 @@ import { CHILD_BINS, ROOT_BIN, addMarkerAtPlayhead, ensureProjectBins } from "..
 import { type ProjectSnapshot, getActiveProject, readProjectSnapshot } from "../ppro/project.ts";
 import { button, card, h, pill, progress, replace, row, type Tone } from "./dom.ts";
 import { type Key, type Lang, defaultLang, getLang, isRtl, pick, setLang, t } from "./i18n.ts";
+import type { Transcript } from "../companion/client.ts";
+import { CaptionsView, ExportView, ReelsView } from "./delivery.ts";
+import type { PhaseHost } from "./kit.ts";
 import { MotionView } from "./motion.ts";
+import { DirectorView, SilenceView, SyncView } from "./production.ts";
 import { STAGES } from "./stages.ts";
 
 declare const __PLUGIN_VERSION__: string;
@@ -68,6 +72,8 @@ export class PanelApp {
   private readonly expanded = new Set<string>();
   private renderedView: string | null = null;
   private readonly motion: MotionView;
+  private readonly stageViews: Record<string, { render(): HTMLElement[] }>;
+  private readonly transcripts = new Map<string, Transcript>();
 
   constructor(root: HTMLElement, tokens: TokenStore) {
     this.root = root;
@@ -98,6 +104,24 @@ export class PanelApp {
       rerender: () => this.render(),
       notify: (tone, text) => this.notify(tone, text),
     });
+    const host: PhaseHost = {
+      client: () => this.client,
+      engineReady: () => this.state.engine.status === "running",
+      snapshot: () => this.state.project,
+      rerender: () => this.render(),
+      notify: (tone, text) => this.notify(tone, text),
+      refresh: () => this.refreshProject(),
+      transcripts: this.transcripts,
+      prefs: this.prefs,
+    };
+    this.stageViews = {
+      sync: new SyncView(host),
+      silence: new SilenceView(host),
+      director: new DirectorView(host),
+      captions: new CaptionsView(host),
+      reels: new ReelsView(host),
+      export: new ExportView(host),
+    };
   }
 
   // ---- lifecycle ------------------------------------------------------------
@@ -453,7 +477,8 @@ export class PanelApp {
           view === "dashboard" ? this.renderDashboard()
             : view === "settings" ? this.renderSettings()
               : view === "motion" ? this.motion.render()
-                : this.renderStage(view)),
+                : this.stageViews[view] ? this.stageViews[view]!.render()
+                  : this.renderStage(view)),
         h("div", { class: "log", id: "log" })));
     const content = this.root.querySelector(".content");
     if (content && keepScroll) content.scrollTop = keepScroll;

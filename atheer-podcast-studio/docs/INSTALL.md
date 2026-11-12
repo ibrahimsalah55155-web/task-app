@@ -12,7 +12,9 @@ One file, installed once. Nothing to open next to Premiere afterwards.
 - a small native launcher (UXP Hybrid addon) that starts the engine **hidden**
   when the panel opens and stops it when Premiere closes.
 
-No pairing code, no console window, no internet needed for the current features.
+No pairing code, no console window. Everything runs on this computer. Internet is needed only once,
+the first time you use Captions/Reels, to download the speech model (large-v3-turbo ≈ 1.6 GB) into
+`%LOCALAPPDATA%\MultimediaAIGroup\engine\models`.
 
 ## Install
 

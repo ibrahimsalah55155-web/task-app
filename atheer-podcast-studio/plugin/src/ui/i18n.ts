@@ -4,9 +4,12 @@
  * Log lines and diagnostics stay in English so support can read them.
  */
 
+import { phasesAr, phasesEn } from "./i18n_phases.ts";
+
 export type Lang = "ar" | "en";
 
 const en = {
+  ...phasesEn,
   appName: "Multimedia & AI Group",
   appSub: "Podcast Studio",
   langButton: "عربي",
@@ -154,6 +157,7 @@ const en = {
 export type Key = keyof typeof en;
 
 const ar: Record<Key, string> = {
+  ...phasesAr,
   appName: "مجموعة الملتيميديا والذكاء الاصطناعي",
   appSub: "استوديو البودكاست",
   langButton: "English",

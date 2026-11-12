@@ -6,7 +6,7 @@ auto camera switching, reels, Arabic captions and motion templates. One `.ccx`
 installs the panel together with its processing engine; the engine starts hidden
 when the panel opens and stops with Premiere. Arabic / English interface.
 
-**Status: 0.2.0. Foundation, built-in engine, Arabic UI and the cut engine are built.** See `docs/COMPATIBILITY.md` for exactly
+**Status: 0.3.0. All stages are built: Sync & Build, Silence Cut, Auto Director, Reels, Captions, Motion Library, Export.** See `docs/COMPATIBILITY.md` for exactly
 what works, what is tested where, and what is blocked by Premiere's API.
 
 ```

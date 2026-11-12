@@ -38,6 +38,8 @@ export interface LiveItem {
 export interface CutRequest {
   remove?: Range[];
   splitAt?: bigint[];
+  /** Override the enabled state per piece (Auto Director). null keeps the source state. */
+  disable?: (p: Piece) => boolean | null;
   newName: string;
   onProgress?: (step: string, fraction: number) => void;
 }
@@ -152,6 +154,12 @@ export async function buildCutSequence(project: Project, source: Sequence, req: 
   const plan = planCuts(live.map((l) => l.src), { tpf, sequenceEnd, remove: req.remove, splitAt: req.splitAt });
   if (plan.skipped.length) {
     throw new Error(`Cannot cut ${plan.skipped.length} clip(s): ${plan.skipped[0]!.reason}. Remove speed changes first.`);
+  }
+  if (req.disable) {
+    for (const p of plan.pieces) {
+      const d = req.disable(p);
+      if (d !== null) p.disabled = d;
+    }
   }
   log.info(`Plan: ${plan.pieces.length} pieces, ${plan.removed.length} range(s) removed (${ticksToTimecode(plan.removedTicks, fps)})`);
 

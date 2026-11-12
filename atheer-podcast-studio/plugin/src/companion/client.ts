@@ -168,6 +168,78 @@ export interface GraphicResult {
   cached: boolean;
 }
 
+export interface Word {
+  start: number;
+  end: number;
+  word: string;
+  prob?: number;
+  speaker?: string | null;
+}
+
+export interface Caption {
+  start: number;
+  end: number;
+  text: string;
+  words: Word[];
+  speaker: string | null;
+  lowConfidence: number[];
+}
+
+export interface Transcript {
+  language: string;
+  segments: { start: number; end: number; text: string; words: Word[] }[];
+  duration: number;
+  cached: boolean;
+}
+
+export interface Reel {
+  start: number;
+  end: number;
+  duration: number;
+  title: string;
+  hook: string;
+  transcript: string;
+  scores: { hook: number; relevance: number; context: number; overall: number };
+  why: string[];
+  notes: string[];
+}
+
+export interface AnalysisInfo {
+  silencePresets: Record<string, Record<string, number>>;
+  silero: boolean;
+  asrModels: Record<string, string>;
+  asrDownloaded: string[];
+  captionStyles: Record<string, { en: string; ar: string }>;
+}
+
+export interface SyncResultRow {
+  path: string;
+  role: string;
+  offset: number | null;
+  seqStart: number | null;
+  method: string;
+  confidence: "high" | "medium" | "low" | "none";
+  score: number;
+  driftPpm: number | null;
+  driftFrames: number | null;
+  warnings: string[];
+}
+
+export interface SilenceCandidate {
+  start: number;
+  end: number;
+  dur: number;
+  gapStart: number;
+  gapEnd: number;
+  kind: string;
+}
+
+export interface Shot {
+  start: number;
+  end: number;
+  camera: "guest" | "host" | "wide";
+}
+
 export const TERMINAL_STATES: ReadonlySet<JobState> = new Set(["succeeded", "failed", "cancelled"]);
 
 export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
@@ -318,6 +390,38 @@ export class CompanionClient {
 
   async submitRender(req: GraphicRequest): Promise<Job<GraphicResult>> {
     return (await this.request<{ job: Job<GraphicResult> }>("POST", "/api/v1/jobs/render_graphic", { body: req })).job;
+  }
+
+  /** Submit any analysis job and follow it to the end. */
+  async runJob<R>(kind: string, body: unknown, onUpdate: (job: Job<R>) => void = () => undefined,
+                  stopFollowing?: () => boolean): Promise<R> {
+    const res = await this.request<{ job: Job<R> }>("POST", `/api/v1/jobs/${kind}`, { body });
+    const done = await this.waitForJob<R>(res.job.id, onUpdate, { stopFollowing });
+    if (done.state !== "succeeded" || done.result === undefined) {
+      throw new CompanionError("server", done.error?.message ?? `Job ${done.state}`);
+    }
+    return done.result;
+  }
+
+  async startJob<R>(kind: string, body: unknown): Promise<Job<R>> {
+    return (await this.request<{ job: Job<R> }>("POST", `/api/v1/jobs/${kind}`, { body })).job;
+  }
+
+  analysisInfo(): Promise<AnalysisInfo> {
+    return this.request<AnalysisInfo>("GET", "/api/v1/analysis/info");
+  }
+
+  async buildCaptions(words: Word[], maxChars: number): Promise<Caption[]> {
+    return (await this.request<{ captions: Caption[] }>("POST", "/api/v1/captions/build", { body: { words, maxChars } })).captions;
+  }
+
+  async writeSrt(captions: Caption[], path: string): Promise<string> {
+    return (await this.request<{ path: string }>("POST", "/api/v1/captions/srt", { body: { captions, path } })).path;
+  }
+
+  async findReels(words: Word[], count: number, minDur: number, maxDur: number): Promise<Reel[]> {
+    return (await this.request<{ reels: Reel[] }>("POST", "/api/v1/reels/find",
+      { body: { words, count, minDur, maxDur }, timeoutMs: 60000 })).reels;
   }
 
   async logs(tail = 200): Promise<string[]> {

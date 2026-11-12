@@ -59,6 +59,7 @@ crypto.getRandomValues = (<T extends ArrayBufferView | null>(a: T): T => {
 }) as typeof crypto.getRandomValues;
 
 const secure = new Map<string, string>();
+let pickCount = 0;
 const uxp = {
   host: { name: "premierepro", version: "27.0.0", uiLocale: "en_US" },
   versions: { uxp: "9.4.0", plugin: "0.3.0" },
@@ -68,7 +69,17 @@ const uxp = {
       async setItem(k: string, v: string) { secure.set(k, v); },
       async removeItem(k: string) { secure.delete(k); },
     },
-    localFileSystem: { async getFileForOpening() { return { nativePath: media("demo_logo.png") }; } },
+    localFileSystem: {
+      async getFileForOpening(o: { types?: string[]; allowMultiple?: boolean } = {}) {
+        const types = o.types ?? [];
+        if (types.includes("png")) return { nativePath: media("demo_logo.png") };
+        if (types.includes("epr")) return { nativePath: "C:/Presets/YouTube 1080p.epr" };
+        const all = ["GUEST_CAM_A001.mov", "HOST_CAM_B001.mov", "WIDE_CAM_C001.mov", "ZOOM_TR1_GUEST.wav", "ZOOM_TR2_HOST.wav"];
+        const next = all[pickCount++ % all.length]!;
+        return o.allowMultiple ? [{ nativePath: media(next) }] : { nativePath: media(next) };
+      },
+      async getFolder() { return { nativePath: `${DEMO_MEDIA}/exports`, isFolder: true }; },
+    },
   },
   entrypoints: {
     setup(cfg: { panels: Record<string, { create(n: HTMLElement): void; show(n: HTMLElement): void }> }) {

@@ -107,6 +107,8 @@ export class FakeClip {
   parent: FakeFolder | null = null;
   sub: { from: FakeClip; inT: number; outT: number; video: boolean; audio: boolean } | null = null;
   lengthTicks = 0; // for imported files (graphics)
+  hasVideo = true;
+  hasAudio = false;
   relinkedTo: string | null = null;
   async canChangeMediaPath() {
     return true;
@@ -182,8 +184,17 @@ export class FakeTrack {
     if (type !== "CLIP") throw new Error("expected Constants.TrackItemType.CLIP");
     return this.items;
   }
+  muted = false;
   async isMuted() {
-    return false;
+    return this.muted;
+  }
+  async setMute(m: boolean) {
+    this.muted = m;
+    return true;
+  }
+  createSetNameAction(name: string) {
+    requireLock("createSetNameAction");
+    return new Action(`trackname:${name}`, () => (this.name = name));
   }
 }
 
@@ -222,7 +233,9 @@ export class FakeSequence {
     return { width: this.frameW, height: this.frameH };
   }
   async getEndTime() {
-    return new FakeTickTime(this.end);
+    // like Premiere: a sequence ends where its last clip ends (end=0 means "derive")
+    const last = Math.max(0, ...[...this.video, ...this.audio].flatMap((t) => t.items.map((i) => i.end)));
+    return new FakeTickTime(this.end || last);
   }
   async getPlayerPosition() {
     return new FakeTickTime(this.playhead);
@@ -293,15 +306,31 @@ export class FakeProject {
   }
   imports: string[] = [];
   importLengthTicks = TPS * 6;
+  mediaLength: Record<string, number> = {};
   async importFiles(paths: string[], _suppress: boolean, bin: FakeFolder) {
     for (const p of paths) {
       this.imports.push(p);
       const c = new FakeClip(p.split(/[\\/]/).pop()!, p);
-      c.lengthTicks = this.importLengthTicks;
+      c.lengthTicks = this.mediaLength[p] ?? this.importLengthTicks;
+      c.hasVideo = !/\.(wav|mp3|m4a|aac)$/i.test(p);
+      c.hasAudio = !/\.(png|jpg)$/i.test(p) && !p.includes("MAG Graphics");
       c.parent = bin;
       bin.items.push(c);
     }
     return true;
+  }
+  async createSequenceFromMedia(name: string, clips: FakeClip[], bin: FakeFolder) {
+    const c = clips[0]!;
+    const seq = new FakeSequence(name, [new FakeTrack("Video 1", [])], [new FakeTrack("Audio 1", [])], this.sequences[0]?.fpsTicks ?? 10160640000);
+    seq.video[0]!.items.push(new FakeTrackItem(c, 0, c.lengthTicks, 0));
+    if (c.hasAudio) seq.audio[0]!.items.push(new FakeTrackItem(c, 0, c.lengthTicks, 0));
+    seq.end = 0;
+    seq.guid = { toString: () => `guid-${name}` };
+    seq.project = this;
+    seq.item = new FakeSeqItem(name);
+    seq.item.parent = bin;
+    this.sequences.push(seq);
+    return seq;
   }
   async openSequence(seq: FakeSequence) {
     this.opened = seq;
@@ -435,12 +464,18 @@ function fakeEditor(seq: FakeSequence) {
         if (sub.audio) overwrite(seq.audio[a]!, new FakeTrackItem(clip, time.ticksNumber, time.ticksNumber + len, 0));
       });
     },
-    createInsertProjectItemAction(clip: FakeClip, time: FakeTickTime, v: number, _a: number, limitShift: boolean) {
+    createInsertProjectItemAction(clip: FakeClip, time: FakeTickTime, v: number, a: number, limitShift: boolean) {
       requireLock("createInsertProjectItemAction");
-      if (!limitShift) throw new Error("graphics insert must not shift other tracks");
+      if (!limitShift) throw new Error("insert must not shift other tracks");
       return new Action(`insert:${clip.name}`, () => {
-        while (seq.video.length <= v) seq.video.push(new FakeTrack(`Video ${seq.video.length + 1}`, []));
-        overwrite(seq.video[v]!, new FakeTrackItem(clip, time.ticksNumber, time.ticksNumber + clip.lengthTicks, 0));
+        // Like Premiere: an index past the end creates exactly ONE track (at the end).
+        const place = (tracks: FakeTrack[], idx: number, kind: string) => {
+          if (idx > tracks.length) throw new Error(`${kind} track ${idx + 1} requested but only ${tracks.length} exist`);
+          if (idx === tracks.length) tracks.push(new FakeTrack(`${kind} ${tracks.length + 1}`, []));
+          overwrite(tracks[idx]!, new FakeTrackItem(clip, time.ticksNumber, time.ticksNumber + clip.lengthTicks, 0));
+        };
+        if (clip.hasVideo) place(seq.video, v, "Video");
+        if (clip.hasAudio) place(seq.audio, a, "Audio");
       });
     },
     createRemoveItemsAction(sel: { items: FakeTrackItem[] }, ripple: boolean) {

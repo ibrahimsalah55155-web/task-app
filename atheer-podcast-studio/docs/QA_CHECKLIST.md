@@ -28,6 +28,18 @@ in `COMPATIBILITY.md` only after it passes here.
 | P1-19 | Mark In/Out on a 3-camera + 2-mic sequence, press **Cut engine test** | New `_CUT_TEST_` sequence opens; panel says all pieces verified; play across the cut: picture and sound stay in sync on every track; original sequence unchanged |
 | P1-20 | Ctrl+Z repeatedly after P1-19 | The test's steps undo cleanly ("MAG: ..." in Edit › Undo) |
 
+## Production stages
+
+| ID | Steps | Expected |
+|---|---|---|
+| P2-01 | Sync: add 3 cameras + 2 mics, Analyze | Offsets with confidence; known offsets match within 1 frame; drift warning on long recordings if clocks differ |
+| P2-02 | Build synced sequence | V1 Wide, V2 Host, V3 Guest; A1/A2 mics; camera audio tracks muted; picture and sound in sync across the episode |
+| P3-01 | Silence: Analyze (Balanced), uncheck a few, Add markers, Remove | New `_SILENCE_CUT` sequence; no clipped words at cut points; all tracks stay in sync |
+| P4-01 | Director: Analyze, change one shot, Apply | New `_DIRECTOR` sequence; only one camera enabled at any time; disabled pieces still on the timeline |
+| P5-01 | Captions: Transcribe (first time downloads the model), edit a line, Export SRT, Add captions | SRT opens correctly; captions sit at exact times on a new top track; RTL text correct |
+| P5-02 | Reels: Find, keep 2, Create (9:16) | REEL_01/02_EDIT exist; frame 1080x1920; face roughly centred (report if Position is off) |
+| P6-01 | Export: select reels, choose preset + folder, Queue | Jobs appear in Media Encoder |
+
 ## Later phases (to be filled per phase)
 
 | ID | Question from the audit |
