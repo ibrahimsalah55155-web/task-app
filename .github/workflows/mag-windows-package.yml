@@ -30,6 +30,12 @@ jobs:
         run: |
           python -m pip install -q ./companion pytest httpx
           cd companion && python -m pytest -q
+      - name: Real Arabic speech-to-text test (downloads Whisper small + a Piper voice)
+        run: |
+          python -m pip install -q piper-tts
+          curl -sSL -o /tmp/ar.onnx https://raw.githubusercontent.com/dibbed/TTSKit-multi-engine-tts/main/models/piper/ar_JO-kareem-medium.onnx
+          curl -sSL -o /tmp/ar.onnx.json https://raw.githubusercontent.com/dibbed/TTSKit-multi-engine-tts/main/models/piper/ar_JO-kareem-medium.onnx.json
+          cd companion && RUN_REAL_ASR=1 PIPER_VOICE=/tmp/ar.onnx ASR_MODEL=small python -m pytest -q -s tests/test_asr_real.py
       - name: Panel checks (types, Adobe lint rules, tests, build)
         run: cd plugin && npm ci && npm run check
 

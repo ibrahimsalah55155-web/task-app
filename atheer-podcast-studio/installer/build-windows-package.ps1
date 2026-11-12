@@ -124,6 +124,22 @@ print('rendered', r['frames'], 'frames ->', r['path'])
 "@
   & (Join-Path $Py "python.exe") -c $RenderTest; Must "graphics render test"
 
+  Say "Testing audio sync (scipy + numpy + FFmpeg) and voice detection (onnxruntime + Silero) on Windows"
+  & $FfDir\ffmpeg.exe -hide_banner -loglevel error -y -f lavfi -i "anoisesrc=d=40:c=pink:r=48000:a=0.4,volume='if(lt(mod(t,1.3),0.5),1,0.05)':eval=frame" (Join-Path $Work "ref.wav")
+  & $FfDir\ffmpeg.exe -hide_banner -loglevel error -y -ss 2.5 -i (Join-Path $Work "ref.wav") -ar 44100 (Join-Path $Work "cam.wav")
+  $SyncTest = @"
+from pathlib import Path
+from atheer_companion.analysis.audio import AudioCache
+from atheer_companion.analysis.sync import SyncFile, sync_files
+from atheer_companion.analysis.vad import silero_available
+c = AudioCache(r'$FfDir\ffmpeg.exe', Path(r'$Work\ac'))
+r = sync_files([SyncFile(r'$Work\ref.wav', 'guest_mic'), SyncFile(r'$Work\cam.wav', 'wide_cam')], c)
+off = [x for x in r['results'] if x['role'] == 'wide_cam'][0]['offset']
+print('offset', off, 'silero', silero_available())
+assert abs(off - 2.5) < 0.01 and silero_available()
+"@
+  & (Join-Path $Py "python.exe") -c $SyncTest; Must "sync test"
+
   Say "Testing the addon: start, health, stop"
   & (Join-Path $Work "test_harness.exe") (Join-Path $AddonDir "mag_engine.uxpaddon") 47830 stop; Must "addon stop test"
 

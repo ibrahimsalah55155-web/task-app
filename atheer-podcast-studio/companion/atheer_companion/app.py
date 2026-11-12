@@ -203,6 +203,10 @@ def create_app(config: Config, store: Store | None = None, auth: Auth | None = N
         job = jobs.submit("probe", {"paths": body.paths})
         return {"job": job.to_json(include_result=False)}
 
+    from .analysis_api import register as register_analysis
+
+    register_analysis(app, jobs, store, config.data_dir, lambda: tools.ffmpeg, lambda: tools.ffprobe, authed)
+
     @app.get(PREFIX + "/graphics/templates", dependencies=authed)
     async def graphics_templates() -> dict[str, Any]:
         return {"templates": [t.describe() for t in TEMPLATES.values()]}
