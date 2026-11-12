@@ -155,7 +155,7 @@ const CARD = (n) => `.content > .card:nth-child(${n})`;
   await step("edit", async () => {
     await scrollTo(CARD(3));
     await sleep(800);
-    await hl(".placed >> nth=0");
+    await hl(".placed");
     await page.locator(".placed .btn").nth(0).click();
     await sleep(800);
     await scrollTo(CARD(2));
