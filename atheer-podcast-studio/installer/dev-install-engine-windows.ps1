@@ -1,4 +1,5 @@
-# Installs the ATHEER companion into a private Python virtual environment and
+# DEVELOPMENT ONLY. Editors install the single .ccx instead (docs/INSTALL.md).
+# Installs the engine into a private Python virtual environment and
 # creates a "Start ATHEER Companion" shortcut on the Desktop. Windows 10/11.
 #
 #   Right-click > Run with PowerShell

@@ -16,7 +16,7 @@ function mount(rootNode?: HTMLElement): void {
     app.start();
   } catch (e) {
     log.error("Panel failed to start", e);
-    root.textContent = `ATHEER Podcast Studio failed to start: ${String((e as Error)?.message ?? e)}`;
+    root.textContent = `Multimedia & AI Group panel failed to start: ${String((e as Error)?.message ?? e)}`;
   }
 }
 
@@ -27,7 +27,7 @@ interface Entrypoints {
 const uxp = require("uxp") as { entrypoints: Entrypoints };
 uxp.entrypoints.setup({
   panels: {
-    atheerPanel: {
+    studioPanel: {
       create(rootNode: HTMLElement) {
         mount(rootNode);
       },

@@ -1,10 +1,12 @@
-# ATHEER PODCAST STUDIO
+# Multimedia & AI Group — Podcast Studio
+# مجموعة الملتيميديا والذكاء الاصطناعي
 
-Podcast post-production for Adobe Premiere Pro 2026: sync, silence cut, auto
-camera switching, reels, Arabic captions and motion templates, as a dockable
-UXP panel backed by a local processing service.
+Podcast post-production for Adobe Premiere Pro 2026 on Windows: sync, silence cut,
+auto camera switching, reels, Arabic captions and motion templates. One `.ccx`
+installs the panel together with its processing engine; the engine starts hidden
+when the panel opens and stops with Premiere. Arabic / English interface.
 
-**Status: Phase 1 (foundation) built.** See `docs/COMPATIBILITY.md` for exactly
+**Status: 0.2.0. Foundation, built-in engine, Arabic UI and the cut engine are built.** See `docs/COMPATIBILITY.md` for exactly
 what works, what is tested where, and what is blocked by Premiere's API.
 
 ```
@@ -16,28 +18,26 @@ atheer-podcast-studio/
 │   ├── src/companion  HTTP client + pairing token storage
 │   ├── src/ui     panel views
 │   └── test/      unit tests (fake premierepro) + real companion integration test
-├── companion/     local service (Python, FastAPI) on 127.0.0.1:47820
+├── native/        engine launcher (UXP Hybrid C++ addon, Windows) + its Windows test harness
+├── companion/     the processing engine (Python, FastAPI) on 127.0.0.1:47820-47823
 │   ├── atheer_companion/  API, pairing auth, jobs, FFprobe inspection, SQLite cache
 │   └── tests/     pytest against real generated media
-├── installer/     Windows / macOS companion installers
+├── installer/     build-windows-package.ps1 (makes the .ccx) + dev-only engine installers
 └── docs/          feasibility audit, compatibility report, install guide, QA checklist
 ```
 
-## Why two programs
+## How the engine lives inside the plugin
 
-Premiere's UXP runtime cannot launch processes, decode audio or run ML models.
-The companion does that work locally and talks only to `127.0.0.1`. The
-panel does every Premiere change itself, through undoable transactions.
+Premiere's UXP JavaScript cannot launch processes, decode audio or run ML models.
+A small native addon (UXP Hybrid, Premiere 26.2+) starts the bundled engine from the
+plugin folder with no window, inside a Windows job object so it can never outlive
+Premiere, and gives it a per-session token. The panel does every Premiere change itself,
+through undoable transactions.
 
 ## Quick start
 
-See `docs/INSTALL.md`. In short:
-
-```bash
-bash installer/install-companion-macos.sh        # or the .ps1 on Windows
-cd plugin && npm ci && npm run check             # builds plugin/dist
-# UXP Developer Tool → Add Plugin → plugin/dist/manifest.json → Load
-```
+Editors: download the `.ccx` from the latest GitHub Actions run and double-click it
+(`docs/INSTALL.md`). Developers: `pwsh installer/build-windows-package.ps1` builds the same file.
 
 ## Development checks
 

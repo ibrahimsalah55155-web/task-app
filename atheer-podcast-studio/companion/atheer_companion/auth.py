@@ -42,8 +42,10 @@ class PairingError(Exception):
 
 
 class Auth:
-    def __init__(self, store: Store, pairing_code: str | None = None) -> None:
+    def __init__(self, store: Store, pairing_code: str | None = None, session_token: str | None = None) -> None:
         self._store = store
+        # Token handed over by the plugin that launched this engine (never stored on disk).
+        self._session_token = session_token if session_token and len(session_token) >= 16 else None
         self._lock = threading.Lock()
         self._code = pairing_code or new_pairing_code()
         self._failed = 0
@@ -76,4 +78,6 @@ class Auth:
     def check(self, token: str | None) -> bool:
         if not token:
             return False
+        if self._session_token and hmac.compare_digest(token, self._session_token):
+            return True
         return self._store.touch_client(hash_token(token))

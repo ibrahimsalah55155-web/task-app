@@ -1,0 +1,57 @@
+name: Multimedia & AI Group plugin (Windows .ccx)
+
+on:
+  push:
+    paths:
+      - 'atheer-podcast-studio/**'
+      - '.github/workflows/mag-windows-package.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: atheer-podcast-studio
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install FFmpeg
+        run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg
+      - name: Engine tests
+        run: |
+          python -m pip install -q ./companion pytest httpx
+          cd companion && python -m pytest -q
+      - name: Panel checks (types, Adobe lint rules, tests, build)
+        run: cd plugin && npm ci && npm run check
+
+  windows-package:
+    needs: checks
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build and test the Windows package
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./atheer-podcast-studio/installer/build-windows-package.ps1 -OutDir build-win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MultimediaAIGroup-windows-ccx
+          path: atheer-podcast-studio/build-win/*.ccx
+          if-no-files-found: error
+          retention-days: 30

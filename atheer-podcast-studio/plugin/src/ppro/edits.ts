@@ -1,6 +1,6 @@
 /**
  * Phase 1 write operations. Small, undoable, and useful later:
- *  - the ATHEER bin structure every later module imports into;
+ *  - the project bin structure every later module imports into;
  *  - a marker at the playhead, which proves the timeline transaction path.
  */
 import type { FolderItem, Project } from "@adobe/premierepro";
@@ -8,11 +8,11 @@ import { logger } from "../core/log.ts";
 import { ppro } from "./api.ts";
 import { type TransactionResult, finishTransaction } from "./transaction.ts";
 
-const BINS_UNDO = "ATHEER: Create project bins";
+const BINS_UNDO = "MAG: Create project bins";
 
 const log = logger("edits");
 
-export const ROOT_BIN = "ATHEER PODCAST STUDIO";
+export const ROOT_BIN = "Multimedia & AI Group";
 export const CHILD_BINS = [
   "01 Footage",
   "02 Audio",
@@ -22,7 +22,7 @@ export const CHILD_BINS = [
   "06 Graphics",
 ] as const;
 
-async function findChildBin(parent: FolderItem, name: string): Promise<FolderItem | null> {
+export async function findChildBin(parent: FolderItem, name: string): Promise<FolderItem | null> {
   const P = ppro();
   // Constants.ProjectItemType is documented from 27.0. On 26.x a clip and a bin
   // can share a name, so a candidate only counts if it behaves like a bin.
@@ -53,7 +53,7 @@ export interface BinResult {
  * Idempotent: running it twice creates nothing the second time.
  * Two undo steps when the root bin is new (the child bins need its handle).
  */
-export async function ensureAtheerBins(project: Project): Promise<BinResult> {
+export async function ensureProjectBins(project: Project): Promise<BinResult> {
   const root = await project.getRootItem();
   const result: BinResult = { created: [], existing: [], undoSteps: 0 };
 
@@ -96,7 +96,7 @@ export async function ensureAtheerBins(project: Project): Promise<BinResult> {
   log.info(
     result.created.length
       ? `Created ${result.created.length} bin(s): ${result.created.join(", ")}`
-      : "ATHEER bins already exist",
+      : "Project bins already exist",
   );
   return result;
 }
@@ -107,7 +107,7 @@ export async function addMarkerAtPlayhead(project: Project, name: string, commen
   if (!seq) throw new Error("Open a sequence first.");
   const position = await seq.getPlayerPosition();
   const markers = await P.Markers.getMarkers(seq);
-  const undo = "ATHEER: Add marker";
+  const undo = "MAG: Add marker";
   let committed = false;
   project.lockedAccess(() => {
     const action = markers.createAddMarkerAction(name, "Comment", position, P.TickTime.TIME_ZERO, comment);

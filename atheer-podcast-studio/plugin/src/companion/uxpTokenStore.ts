@@ -7,7 +7,7 @@ import type { TokenStore } from "./client.ts";
 
 declare const require: (id: string) => unknown;
 const log = logger("token");
-const KEY = "atheer.companion.token";
+const KEY = "mag.engine.token";
 
 interface SecureStorage {
   getItem(key: string): Promise<Uint8Array | ArrayBuffer | string | null>;

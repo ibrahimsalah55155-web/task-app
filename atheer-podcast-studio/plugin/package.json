@@ -1,8 +1,8 @@
 {
-  "name": "atheer-podcast-studio-panel",
-  "version": "0.1.0",
+  "name": "mag-podcast-studio-panel",
+  "version": "0.2.0",
   "private": true,
-  "description": "ATHEER PODCAST STUDIO - UXP panel for Adobe Premiere Pro 2026 (26.x)",
+  "description": "Multimedia & AI Group - Podcast Studio panel for Adobe Premiere Pro 2026",
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p test",
     "lint": "eslint src",
     "test": "node --experimental-strip-types --no-warnings --test test/*.test.ts",
-    "check": "npm run typecheck && npm run lint && npm test && npm run build"
+    "check": "npm run typecheck && npm run lint && npm test && npm run build",
+    "build:hybrid": "node build.mjs --hybrid"
   },
   "devDependencies": {
     "@adobe/cc-ext-uxp-types": "7.3.1",

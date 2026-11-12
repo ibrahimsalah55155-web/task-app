@@ -17,6 +17,24 @@ in Premiere, in priority order.
 
 ---
 
+## 0. Update 2026-11-12 (after the editor's requirements)
+
+The editor works on **one Windows machine** with the **latest Premiere from Creative Cloud** and wants
+**nothing to open beside Premiere**. Changes:
+
+- **Engine inside the plugin.** Premiere 26.2+ supports UXP Hybrid plugins (native C++ addons). The plugin
+  now ships a small addon (`native/engine_launcher`) that starts the engine from the plugin's own folder with
+  `CREATE_NO_WINDOW`, inside a Windows job object with `KILL_ON_JOB_CLOSE` (it cannot outlive Premiere), and
+  hands it a per-session token through its environment. No pairing, no console, no separate install.
+  The engine runs on the official signed embeddable CPython (less antivirus trouble than a packed exe).
+  Windows only, which is allowed for independent `.ccx` distribution.
+- **Razor replacement ("cut engine").** Still no split API in 26.x/27.0. The cut engine plans every piece with
+  exact tick math, creates one subclip per media range (`createSubClipAction`, 26.3), clones the sequence,
+  clears the clone, overwrites each piece at its exact time on its original track, restores disabled states,
+  then **reads the result back and verifies every piece**. The original sequence is never modified. This one
+  mechanism serves Silence Cut (remove ranges) and Auto Director (split points + disable).
+- **MOGRT text:** the user is on Premiere 27, so `MogrtText` (27.0) is usable for the Motion Library.
+
 ## 1. Verdict per feature
 
 | # | Feature | Verdict | Main reason |
@@ -47,9 +65,9 @@ in Premiere, in priority order.
 
 ## 2. Platform constraints (apply to everything)
 
-1. **UXP is not Node.** No `child_process`, no spawning Python/FFmpeg. `shell.openPath/openExternal`
-   open files or URLs with a consent dialog; they cannot start and manage a service.
-   → The **companion** is installed separately and started by the user (Desktop shortcut).
+1. **UXP is not Node.** No `child_process`. `shell.openPath/openExternal` open files or URLs with a
+   consent dialog; they cannot start and manage a service.
+   → Solved with a UXP Hybrid addon that launches the bundled engine hidden (section 0).
 2. **Network permission.** Requests are allowed only to domains listed in
    `requiredPermissions.network.domains`. The manifest lists `http://127.0.0.1:47820`,
    `ws://127.0.0.1:47820` and the `localhost` equivalents. The port is therefore fixed.

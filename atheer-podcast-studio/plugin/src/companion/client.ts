@@ -132,7 +132,7 @@ export interface ProbeResult {
 
 export const TERMINAL_STATES: ReadonlySet<JobState> = new Set(["succeeded", "failed", "cancelled"]);
 
-type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
+export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 
 export interface ClientOptions {
   baseUrl?: string;
@@ -153,7 +153,7 @@ export class CompanionClient {
     this.baseUrl = (opts.baseUrl ?? DEFAULT_COMPANION_URL).replace(/\/+$/, "");
     this.tokens = opts.tokens ?? new MemoryTokenStore();
     this.fetchFn = opts.fetchFn ?? ((url, init) => fetch(url, init));
-    this.clientName = opts.clientName ?? "ATHEER Premiere panel";
+    this.clientName = opts.clientName ?? "Premiere panel";
   }
 
   get wsUrl(): string {
@@ -192,7 +192,7 @@ export class CompanionClient {
     } catch (e) {
       if (e instanceof CompanionError) throw e;
       throw new CompanionError("offline",
-        `Companion is not reachable at ${this.baseUrl}. Start it with the "Start ATHEER Companion" shortcut. (${errorMessage(e)})`);
+        `Companion is not reachable at ${this.baseUrl}. (${errorMessage(e)})`);
     } finally {
       clearTimeout(timer);
     }

@@ -1,7 +1,7 @@
 {
-  "id": "com.atheer.podcaststudio",
-  "name": "ATHEER Podcast Studio",
-  "version": "0.1.0",
+  "id": "com.multimediaai.podcaststudio",
+  "name": "Multimedia & AI Group",
+  "version": "0.2.0",
   "main": "index.html",
   "manifestVersion": 5,
   "host": {
@@ -15,6 +15,12 @@
       "domains": [
         "http://127.0.0.1:47820",
         "ws://127.0.0.1:47820",
+        "http://127.0.0.1:47821",
+        "ws://127.0.0.1:47821",
+        "http://127.0.0.1:47822",
+        "ws://127.0.0.1:47822",
+        "http://127.0.0.1:47823",
+        "ws://127.0.0.1:47823",
         "http://localhost:47820",
         "ws://localhost:47820"
       ]
@@ -22,16 +28,56 @@
   },
   "entrypoints": [
     {
-      "id": "atheerPanel",
+      "id": "studioPanel",
       "type": "panel",
-      "label": { "default": "ATHEER Podcast Studio" },
-      "minimumSize": { "width": 280, "height": 360 },
-      "maximumSize": { "width": 2000, "height": 3000 },
-      "preferredDockedSize": { "width": 360, "height": 640 },
-      "preferredFloatingSize": { "width": 420, "height": 720 },
+      "label": {
+        "default": "Multimedia & AI Group",
+        "ar": "مجموعة الملتيميديا والذكاء الاصطناعي"
+      },
+      "minimumSize": {
+        "width": 280,
+        "height": 360
+      },
+      "maximumSize": {
+        "width": 2000,
+        "height": 3000
+      },
+      "preferredDockedSize": {
+        "width": 360,
+        "height": 640
+      },
+      "preferredFloatingSize": {
+        "width": 420,
+        "height": 720
+      },
       "icons": [
-        { "width": 23, "height": 23, "path": "icons/panel-dark.svg", "scale": [1, 2], "theme": ["darkest", "dark", "medium"] },
-        { "width": 23, "height": 23, "path": "icons/panel-light.svg", "scale": [1, 2], "theme": ["lightest", "light"] }
+        {
+          "width": 23,
+          "height": 23,
+          "path": "icons/panel-dark.svg",
+          "scale": [
+            1,
+            2
+          ],
+          "theme": [
+            "darkest",
+            "dark",
+            "medium"
+          ]
+        },
+        {
+          "width": 23,
+          "height": 23,
+          "path": "icons/panel-light.svg",
+          "scale": [
+            1,
+            2
+          ],
+          "theme": [
+            "lightest",
+            "light"
+          ]
+        }
       ]
     }
   ],
@@ -40,9 +86,21 @@
       "width": 48,
       "height": 48,
       "path": "icons/plugin.svg",
-      "scale": [1, 2],
-      "theme": ["darkest", "dark", "medium", "lightest", "light", "all"],
-      "species": ["pluginList"]
+      "scale": [
+        1,
+        2
+      ],
+      "theme": [
+        "darkest",
+        "dark",
+        "medium",
+        "lightest",
+        "light",
+        "all"
+      ],
+      "species": [
+        "pluginList"
+      ]
     }
   ]
 }

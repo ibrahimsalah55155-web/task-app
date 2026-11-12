@@ -1,80 +1,63 @@
-# Installing ATHEER Podcast Studio (Premiere Pro 2026)
+# Installing — Multimedia & AI Group (Premiere Pro, Windows)
 
-Two parts are installed:
+One file, installed once. Nothing to open next to Premiere afterwards.
 
-1. **The panel**: a UXP plugin inside Premiere.
-2. **The companion**: a small local program that does the media and AI work.
-   It runs only on your machine (address `127.0.0.1:47820`) and never needs an API key.
+## What you install
 
-## Requirements
+`MultimediaAIGroup-<version>.ccx` contains:
 
-- Adobe Premiere Pro 2026, version **26.3 or newer** recommended (26.0+ loads).
-- Python **3.10+** (Windows: python.org installer with "Add python.exe to PATH").
-- FFmpeg (includes FFprobe).
-  - Windows: `winget install --id Gyan.FFmpeg -e`
-  - macOS: `brew install ffmpeg`
-- For development only: Node.js 20+ and the **UXP Developer Tool** (UDT) 2.2+ from Creative Cloud.
+- the panel;
+- the processing engine (official signed Python + the engine code);
+- FFmpeg / FFprobe;
+- a small native launcher (UXP Hybrid addon) that starts the engine **hidden**
+  when the panel opens and stops it when Premiere closes.
 
-## 1. Install the companion
+No pairing code, no console window, no internet needed for the current features.
 
-Windows (PowerShell):
+## Install
 
-```powershell
-powershell -ExecutionPolicy Bypass -File installer\install-companion-windows.ps1
-```
+1. Download the `.ccx`: GitHub → **Actions** → *Multimedia & AI Group plugin (Windows .ccx)* →
+   latest green run → **Artifacts** → `MultimediaAIGroup-windows-ccx` (unzip it to get the `.ccx`).
+2. Close Premiere Pro.
+3. Double-click the `.ccx`. Creative Cloud opens and warns that the plugin is not from the
+   Marketplace; click **Install**.
+4. Open Premiere Pro → **Window › UXP Plugins › Multimedia & AI Group**. Dock the panel.
 
-macOS (Terminal):
+The first start can take up to ~30 seconds while Windows Defender scans the new files.
+After that the engine starts in a few seconds.
 
-```bash
-bash installer/install-companion-macos.sh
-```
+## Use the language button
 
-Add `-WithAI` (Windows) or `--with-ai` (macOS) to also install the speech/VAD
-packages used from Phase 2. They are large; Phase 1 does not need them.
+The **عربي / English** button at the top switches the whole panel. The choice is remembered.
 
-The installer creates **Start ATHEER Companion** (a Desktop shortcut on Windows;
-a `.command` file in `~/Library/Application Support/AtheerPodcastStudio` on macOS).
+## First checks (please send the result)
 
-## 2. Build and load the panel (development build)
+1. Dashboard → **Engine** shows *running / شغال*.
+2. Open a sequence → **Inspect sequence media / فحص ملفات السيكوانس**.
+3. **Cut engine test / اختبار محرك التقطيع**: mark In and Out on the timeline (I / O keys), press
+   the button. A new sequence `<name>_CUT_TEST_<time>` opens with that range removed from all
+   tracks. The panel says whether every piece was verified frame-exact.
+4. Settings → **Copy diagnostics / نسخ بيانات التشخيص**, and paste it to us.
 
-```bash
-cd plugin
-npm ci
-npm run check      # typecheck + Adobe lint rules + tests + build
-```
+## Uninstall
 
-Then in the UXP Developer Tool:
-
-1. Start Premiere Pro.
-2. UDT → **Add Plugin** → choose `plugin/dist/manifest.json`.
-3. Click **Load**. In Premiere open **Window › UXP Plugins › ATHEER Podcast Studio**
-   (if it does not appear, untick and re-tick it in that menu).
-4. Dock the panel wherever you like.
-
-To make an installable package: UDT → **Package** → produces a `.ccx` file.
-Double-click the `.ccx` on the editing machine to install it through Creative Cloud.
-
-## 3. First run
-
-1. Double-click **Start ATHEER Companion**. A window shows a 6-character pairing code.
-   Keep this window open while you edit.
-2. In the panel's **Dashboard › Companion** card, type the code and press **Pair**.
-   This is needed once; the panel remembers it.
-3. Open a sequence and press **Inspect sequence media**.
+Creative Cloud → **Stock & Marketplace › Plugins › Manage plugins** → remove *Multimedia & AI Group*.
+The engine's cache lives in `%LOCALAPPDATA%\MultimediaAIGroup` and can be deleted.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| Companion card says "offline" | Start the companion; check nothing else uses port 47820. |
-| "Port 47820 is already in use" | A companion is already running, or another app uses the port. The port is fixed by the plugin manifest. |
-| "origin_rejected" | Restart the companion with the `--allow-origin` value the panel shows, then send us that value (QA P1-06). |
-| Pairing says "Too many wrong codes" | Wait 60 s; a new code is shown in the companion window. |
-| "Not paired" after reinstalling Premiere | Pair again (secure storage was cleared). |
-| FFprobe "NOT FOUND" | Install FFmpeg, or start the companion with `--ffprobe <path> --ffmpeg <path>`. |
-| Forget all paired panels | `Start ATHEER Companion --revoke-all` |
+| Engine shows *error* with "Engine not found" | The package is incomplete. Reinstall the `.ccx`. |
+| Engine shows *error* "did not answer within 45 s" | Antivirus is still scanning or blocking `engine\python\pythonw.exe` in the plugin folder. Allow it, then press **Restart engine**. |
+| "No free port" | Another program uses ports 47820–47823. Close it and press **Restart engine**. |
+| Cut test: "Needs Premiere 26.3" | Update Premiere from Creative Cloud. |
+| Cut test reports pieces that differ | Copy diagnostics and send them: this is exactly what the test is for. |
 
-Logs: the companion writes `companion.log` under its data folder
-(`%LOCALAPPDATA%\AtheerPodcastStudio\companion\logs` on Windows,
-`~/Library/Application Support/AtheerPodcastStudio/companion/logs` on macOS).
-The panel's **Settings › Copy diagnostics** copies versions, API availability and recent log lines.
+## For developers
+
+- Build the `.ccx` on Windows: `pwsh installer/build-windows-package.ps1` (needs Visual Studio 2022 C++,
+  Node 20+, Python 3.12). CI runs the same script on every push.
+- Develop without the addon: `cd plugin && npm ci && npm run build`, load `plugin/dist/manifest.json`
+  in the UXP Developer Tool, and run the engine by hand (`installer/dev-install-engine-*.*`);
+  the panel then asks for the pairing code the engine prints.

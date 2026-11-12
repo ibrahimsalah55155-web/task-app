@@ -1,14 +1,16 @@
 /** Persistent panel preferences (UXP localStorage). Never throws. */
 
 export interface Prefs {
+  lang: "ar" | "en" | null; // null: follow Premiere's UI language
   companionUrl: string;
   logLevel: "debug" | "info" | "warn" | "error";
   lastView: string;
 }
 
-const KEY = "atheer.prefs.v1";
+const KEY = "mag.prefs.v1";
 
 export const DEFAULT_PREFS: Prefs = {
+  lang: null,
   companionUrl: "http://127.0.0.1:47820",
   logLevel: "info",
   lastView: "dashboard",

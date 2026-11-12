@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 import { __setHostModulesForTests } from "../src/ppro/api.ts";
 import { capability, detectCapabilities } from "../src/ppro/capabilities.ts";
-import { CHILD_BINS, ROOT_BIN, addMarkerAtPlayhead, ensureAtheerBins } from "../src/ppro/edits.ts";
+import { CHILD_BINS, ROOT_BIN, addMarkerAtPlayhead, ensureProjectBins } from "../src/ppro/edits.ts";
 import { readProjectSnapshot } from "../src/ppro/project.ts";
 import { TransactionError } from "../src/ppro/transaction.ts";
 import { type Fake, FakeClip, FakeFolder, buildFake } from "./fakePremiere.ts";
@@ -46,14 +46,14 @@ test("no active sequence is reported, not invented", async () => {
 test("bins are created under the lock, idempotently, as undoable steps", async () => {
   // A clip with the root bin's name must not be mistaken for the bin.
   fake.project.root.items.push(new FakeClip(ROOT_BIN, "/Media/ATHEER PODCAST STUDIO.mov"));
-  const first = await ensureAtheerBins(fake.project as never);
+  const first = await ensureProjectBins(fake.project as never);
   assert.equal(first.created.length, 1 + CHILD_BINS.length);
   assert.equal(first.undoSteps, 2);
-  assert.deepEqual(fake.project.undoStack, ["ATHEER: Create project bins", "ATHEER: Create project bins"]);
+  assert.deepEqual(fake.project.undoStack, ["MAG: Create project bins", "MAG: Create project bins"]);
   const root = fake.project.root.items.find((i) => i instanceof FakeFolder && i.name === ROOT_BIN) as FakeFolder;
   assert.deepEqual(root.items.map((i) => i.name), [...CHILD_BINS]);
 
-  const second = await ensureAtheerBins(fake.project as never);
+  const second = await ensureProjectBins(fake.project as never);
   assert.equal(second.created.length, 0);
   assert.equal(second.undoSteps, 0);
   assert.equal(fake.project.undoStack.length, 2);
@@ -63,7 +63,7 @@ test("only missing child bins are added", async () => {
   const root = new FakeFolder(ROOT_BIN);
   root.items.push(new FakeFolder("01 Footage"));
   fake.project.root.items.push(root);
-  const r = await ensureAtheerBins(fake.project as never);
+  const r = await ensureProjectBins(fake.project as never);
   assert.equal(r.undoSteps, 1);
   assert.equal(r.created.length, CHILD_BINS.length - 1);
 });
@@ -71,7 +71,7 @@ test("only missing child bins are added", async () => {
 test("marker goes to the playhead in one undo step", async () => {
   await addMarkerAtPlayhead(fake.project as never, "ATHEER check", "hello");
   assert.deepEqual(fake.sequence.markers.list, [{ name: "ATHEER check", start: 8475667200 * 1800, comment: "hello" }]);
-  assert.deepEqual(fake.project.undoStack, ["ATHEER: Add marker"]);
+  assert.deepEqual(fake.project.undoStack, ["MAG: Add marker"]);
 });
 
 test("a rejected transaction raises and changes nothing", async () => {

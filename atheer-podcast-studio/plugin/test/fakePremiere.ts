@@ -51,7 +51,36 @@ export class FakeFolder {
     requireLock("createBinAction");
     return new Action(`bin:${name}`, () => this.items.push(new FakeFolder(name)));
   }
+  createMoveItemAction(item: FakeFolder | FakeClip | FakeSeqItem, newParent: FakeFolder) {
+    requireLock("createMoveItemAction");
+    return new Action(`move:${item.name}`, () => {
+      const from = item.parent ?? this;
+      from.items = from.items.filter((i) => i !== item);
+      newParent.items.push(item as FakeClip);
+      item.parent = newParent;
+    });
+  }
+  parent: FakeFolder | null = null;
 }
+
+let idCounter = 0;
+
+export class FakeSeqItem {
+  name: string;
+  parent: FakeFolder | null = null;
+  constructor(name: string) {
+    this.name = name;
+  }
+  createSetNameAction(name: string) {
+    requireLock("createSetNameAction");
+    return new Action(`rename:${name}`, () => (this.name = name));
+  }
+  getParentBin() {
+    return this.parent ?? fakeRoot!;
+  }
+}
+
+let fakeRoot: FakeFolder | null = null;
 
 export class FakeClip {
   name: string;
@@ -74,19 +103,62 @@ export class FakeClip {
   async isSequence() {
     return this.sequence;
   }
+  readonly id = `clip-${++idCounter}`;
+  parent: FakeFolder | null = null;
+  sub: { from: FakeClip; inT: number; outT: number; video: boolean; audio: boolean } | null = null;
+  getId() {
+    return this.id;
+  }
+  createSubClipAction(name: string, start: FakeTickTime, end: FakeTickTime, _hard: boolean,
+                      opts: { takeVideo?: boolean; takeAudio?: boolean } = {}) {
+    requireLock("createSubClipAction");
+    return new Action(`subclip:${name}`, () => {
+      const c = new FakeClip(name, this.path);
+      c.sub = { from: this, inT: start.ticksNumber, outT: end.ticksNumber, video: opts.takeVideo ?? true, audio: opts.takeAudio ?? true };
+      c.parent = fakeRoot;
+      fakeRoot!.items.push(c); // Premiere's default destination is not documented; the engine must find it anywhere
+    });
+  }
 }
 
-class FakeTrackItem {
+export class FakeTrackItem {
   readonly clip: FakeClip | null;
-  constructor(clip: FakeClip | null) {
+  start: number;
+  end: number;
+  inPoint: number;
+  speed = 1;
+  disabled = false;
+  constructor(clip: FakeClip | null, start = 0, end = 0, inPoint = 0) {
     this.clip = clip;
+    this.start = start;
+    this.end = end;
+    this.inPoint = inPoint;
   }
   async getProjectItem() {
     return this.clip;
   }
+  async getStartTime() {
+    return new FakeTickTime(this.start);
+  }
+  async getEndTime() {
+    return new FakeTickTime(this.end);
+  }
+  async getInPoint() {
+    return new FakeTickTime(this.inPoint);
+  }
+  async getSpeed() {
+    return this.speed;
+  }
+  async isDisabled() {
+    return this.disabled;
+  }
+  createSetDisabledAction(d: boolean) {
+    requireLock("createSetDisabledAction");
+    return new Action(`disable:${d}`, () => (this.disabled = d));
+  }
 }
 
-class FakeTrack {
+export class FakeTrack {
   name: string;
   items: FakeTrackItem[];
   constructor(name: string, items: FakeTrackItem[]) {
@@ -135,7 +207,7 @@ export class FakeSequence {
     return { width: 1920, height: 1080 };
   }
   async getEndTime() {
-    return new FakeTickTime(TPS * 3600 + this.fpsTicks * 12);
+    return new FakeTickTime(this.end);
   }
   async getPlayerPosition() {
     return new FakeTickTime(this.playhead);
@@ -155,6 +227,36 @@ export class FakeSequence {
   async getCaptionTrackCount() {
     return 0;
   }
+  inPoint = 0;
+  outPoint = 0;
+  end = TPS * 3600 + 8475667200 * 12;
+  item: FakeSeqItem | null = null;
+  project: FakeProject | null = null;
+  async getInPoint() {
+    return new FakeTickTime(this.inPoint);
+  }
+  async getOutPoint() {
+    return new FakeTickTime(this.outPoint);
+  }
+  async getProjectItem() {
+    if (!this.item) this.item = new FakeSeqItem(this.name);
+    return this.item;
+  }
+  createCloneAction() {
+    requireLock("createCloneAction");
+    return new Action(`clone:${this.name}`, () => {
+      const copy = (t: FakeTrack) => new FakeTrack(t.name, t.items.map((i) => {
+        const c = new FakeTrackItem(i.clip, i.start, i.end, i.inPoint);
+        c.disabled = i.disabled;
+        return c;
+      }));
+      const clone = new FakeSequence(`${this.name} Copy`, this.video.map(copy), this.audio.map(copy), this.fpsTicks);
+      clone.end = this.end;
+      clone.guid = { toString: () => `guid-${++idCounter}` };
+      clone.project = this.project;
+      this.project!.sequences.push(clone);
+    });
+  }
 }
 
 export class FakeProject {
@@ -165,9 +267,16 @@ export class FakeProject {
   active: FakeSequence | null;
   undoStack: string[] = [];
   rejectNext = false;
+  opened: FakeSequence | null = null;
   constructor(seq: FakeSequence | null) {
     this.sequences = seq ? [seq] : [];
     this.active = seq;
+    if (seq) seq.project = this;
+    fakeRoot = this.root;
+  }
+  async openSequence(seq: FakeSequence) {
+    this.opened = seq;
+    return true;
   }
   async getRootItem() {
     return this.root;
@@ -244,15 +353,62 @@ export function buildFake(): Fake {
       },
     },
     Markers: { getMarkers: async (s: FakeSequence) => s.markers },
-    TickTime: { TIME_ZERO: new FakeTickTime(0) },
-    SequenceEditor: { getEditor: () => ({}) },
+    TickTime: { TIME_ZERO: new FakeTickTime(0), createWithTicks: (t: string) => new FakeTickTime(Number(t)) },
+    SequenceEditor: { getEditor: (seq: FakeSequence) => fakeEditor(seq) },
+    TrackItemSelection: {
+      createEmptySelection(cb: (sel: { items: FakeTrackItem[]; addItem(i: FakeTrackItem): boolean }) => void) {
+        const sel = { items: [] as FakeTrackItem[], addItem(i: FakeTrackItem) { this.items.push(i); return true; } };
+        cb(sel);
+        return true;
+      },
+    },
     Transcript: { hasTranscript: () => false, transcribeClipProjectItem: async () => true },
     EventManager: { addGlobalEventListener: () => undefined },
     Constants: {
       TrackItemType: { CLIP: "CLIP" },
+      MediaType: { ANY: "ANY" },
       SequenceEvent: { ACTIVATED: "seqActivated", CLOSED: "seqClosed" },
       ProjectEvent: { OPENED: "projOpened", CLOSED: "projClosed", ACTIVATED: "projActivated" },
     },
   };
   return { module, project, sequence: seq };
+}
+
+/** Overwrite semantics: the new clip replaces whatever overlaps it on that track. */
+export const editorFaults = { wrongLength: false };
+
+function overwrite(track: FakeTrack, item: FakeTrackItem) {
+  const kept: FakeTrackItem[] = [];
+  for (const it of track.items) {
+    if (it.end <= item.start || it.start >= item.end) kept.push(it);
+    else {
+      if (it.start < item.start) kept.push(Object.assign(new FakeTrackItem(it.clip, it.start, item.start, it.inPoint)));
+      if (it.end > item.end) kept.push(new FakeTrackItem(it.clip, item.end, it.end, it.inPoint + (item.end - it.start)));
+    }
+  }
+  kept.push(item);
+  track.items = kept.sort((a, b) => a.start - b.start);
+}
+
+function fakeEditor(seq: FakeSequence) {
+  return {
+    createOverwriteItemAction(clip: FakeClip, time: FakeTickTime, v: number, a: number) {
+      requireLock("createOverwriteItemAction");
+      return new Action(`overwrite:${clip.name}`, () => {
+        const sub = clip.sub!;
+        let len = sub.outT - sub.inT;
+        if (editorFaults.wrongLength) len -= seq.fpsTicks;
+        if (sub.video) overwrite(seq.video[v]!, new FakeTrackItem(clip, time.ticksNumber, time.ticksNumber + len, 0));
+        if (sub.audio) overwrite(seq.audio[a]!, new FakeTrackItem(clip, time.ticksNumber, time.ticksNumber + len, 0));
+      });
+    },
+    createRemoveItemsAction(sel: { items: FakeTrackItem[] }, ripple: boolean) {
+      requireLock("createRemoveItemsAction");
+      if (ripple) throw new Error("engine must not ripple-delete");
+      const victims = new Set(sel.items);
+      return new Action(`remove:${victims.size}`, () => {
+        for (const t of [...seq.video, ...seq.audio]) t.items = t.items.filter((i) => !victims.has(i));
+      });
+    },
+  };
 }

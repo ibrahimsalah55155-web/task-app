@@ -49,11 +49,26 @@ body {
   border-bottom: 1px solid var(--line);
 }
 
-.brand { display: flex; flex-direction: row; align-items: center; }
-.brand-mark { font-size: 14px; font-weight: 700; letter-spacing: 2px; color: var(--accent); }
-.brand-sub { font-size: 11px; color: var(--muted); margin-left: 8px; white-space: nowrap; }
-.header-pills { display: flex; flex-direction: row; }
-.header-pills .pill { margin-left: 6px; }
+.header { flex-wrap: wrap; }
+.brand { display: flex; flex-direction: column; flex-shrink: 1; margin-right: 8px; }
+.brand-mark { font-size: 13px; font-weight: 700; color: var(--accent); }
+.brand-sub { font-size: 10px; color: var(--muted); white-space: nowrap; }
+.header-right { display: flex; flex-direction: row; align-items: center; flex-shrink: 0; margin-top: 2px; }
+.header-right .pill { margin-left: 6px; }
+.lang-btn {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+.lang-btn:hover { background-color: var(--surface-2); }
+
+.seg { display: flex; flex-direction: row; }
+.seg-item { padding: 3px 10px; border: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.seg-item.is-active { color: var(--accent); border-color: var(--accent); }
 
 .nav {
   display: flex;
@@ -97,6 +112,7 @@ body {
 .notice-warn { border-color: var(--warn); }
 .notice-bad { border-color: var(--bad); }
 .notice-x { color: var(--muted); margin-left: 10px; font-size: 14px; }
+.notice-text { flex-grow: 1; flex-shrink: 1; }
 
 /* ---- cards ---- */
 
@@ -234,6 +250,38 @@ body {
 .log-line { font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .log-warn { color: var(--warn); }
 .log-error { color: var(--bad); }
+
+/* ---- Arabic: right-to-left layout ----
+ * UXP's CSS has no `direction`, so rows are mirrored with row-reverse and text
+ * is right-aligned. File names, paths and timecodes keep left-to-right (.ltr). */
+.rtl .header,
+.rtl .brand-row,
+.rtl .header-right,
+.rtl .nav,
+.rtl .notice,
+.rtl .card-head,
+.rtl .card-right,
+.rtl .kv,
+.rtl .actions,
+.rtl .pair,
+.rtl .cap,
+.rtl .track,
+.rtl .warn-line,
+.rtl .seg { flex-direction: row-reverse; }
+.rtl .brand { align-items: flex-end; margin-right: 0; margin-left: 8px; }
+.rtl .content, .rtl .card-body, .rtl p, .rtl .subhead, .rtl .fold-head, .rtl .list li, .rtl .kv-v,
+.rtl .cap-label, .rtl .track-name, .rtl .progress-label, .rtl .notice-text { text-align: right; }
+.rtl .header-right .pill { margin-left: 0; margin-right: 6px; }
+.rtl .lang-btn { margin-left: 0; margin-right: 8px; }
+.rtl .nav-item { margin: 0 0 4px 4px; }
+.rtl .btn { margin: 0 0 6px 6px; }
+.rtl .cap .pill { margin-right: 0; margin-left: 8px; }
+.rtl .warn-line .pill { margin-right: 0; margin-left: 6px; }
+.rtl .track-n { margin-left: 0; margin-right: 8px; }
+.rtl .input { margin-right: 0; margin-left: 6px; }
+.rtl .notice-x { margin-left: 0; margin-right: 10px; }
+.rtl .list { padding-left: 0; padding-right: 16px; }
+.rtl .ltr, .rtl .file-name, .rtl .file-meta, .rtl .file-warn, .rtl .log-line { text-align: left; }
 
 @media (max-width: 320px) {
   .kv-k { width: 70px; }

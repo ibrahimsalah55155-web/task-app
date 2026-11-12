@@ -12,16 +12,16 @@ from . import DEFAULT_PORT
 
 def default_data_dir() -> Path:
     """Per-user folder for the database, logs and caches."""
-    override = os.environ.get("ATHEER_COMPANION_HOME")
+    override = os.environ.get("MAG_ENGINE_HOME") or os.environ.get("ATHEER_COMPANION_HOME")
     if override:
         return Path(override).expanduser()
     if sys.platform == "win32":
         base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
-        return base / "AtheerPodcastStudio" / "companion"
+        return base / "MultimediaAIGroup" / "engine"
     if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "AtheerPodcastStudio" / "companion"
+        return Path.home() / "Library" / "Application Support" / "MultimediaAIGroup" / "engine"
     base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
-    return base / "atheer-podcast-studio" / "companion"
+    return base / "multimedia-ai-group" / "engine"
 
 
 @dataclass

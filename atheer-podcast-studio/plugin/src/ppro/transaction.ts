@@ -9,9 +9,9 @@
  *     const action = thing.createXAction(...);          // created under the lock
  *     committed = project.executeTransaction((compound) => {
  *       compound.addAction(action);                     // one Undo step
- *     }, "ATHEER: ...");
+ *     }, "MAG: ...");
  *   });
- *   finishTransaction(committed, "ATHEER: ...", 1);
+ *   finishTransaction(committed, "MAG: ...", 1);
  *
  * Nothing asynchronous may run inside either callback: gather all data
  * (await ...) before entering lockedAccess.

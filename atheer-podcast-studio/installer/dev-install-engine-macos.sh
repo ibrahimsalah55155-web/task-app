@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Installs the ATHEER companion into a private Python virtual environment and
+# DEVELOPMENT ONLY. Editors install the single .ccx instead (docs/INSTALL.md).
+# Installs the engine into a private Python virtual environment and
 # creates a double-clickable starter. macOS (works on Linux too).
 #
 #   bash installer/install-companion-macos.sh

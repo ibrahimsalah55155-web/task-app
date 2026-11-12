@@ -1,126 +1,155 @@
 /**
- * The eight workflow stages. Stages that are not built yet say so plainly and
- * carry no action buttons: nothing in the panel pretends to work.
+ * The workflow stages, in Arabic and English. Stages that are not built yet
+ * say so plainly and carry no action buttons: nothing pretends to work.
  */
+
+type Text = { en: string; ar: string };
 
 export interface StageDef {
   id: string;
   step: number;
-  title: string;
-  short: string;
+  title: Text;
+  short: Text;
   phase: number;
-  goal: string;
-  approach: string[];
-  limits: string[];
-  companionNeeds: string[];
+  goal: Text;
+  approach: Text[];
+  limits: Text[];
+  engineNeeds: string[];
 }
 
 export const STAGES: StageDef[] = [
   {
     id: "sync",
     step: 1,
-    title: "Sync & Build",
-    short: "Sync",
+    title: { en: "Sync & Build", ar: "المزامنة وبناء التايم لاين" },
+    short: { en: "Sync", ar: "المزامنة" },
     phase: 2,
-    goal: "Inspect every camera and recorder file, sync them on one timebase and build an editable multicam sequence (V1 Wide, V2 Host, V3 Guest; A1 Guest mic, A2 Host mic).",
+    goal: {
+      en: "Inspect every file from the Guest Camera, Host Camera, Wide Camera and the external mics, sync them on one timebase and build an editable sequence: V1 Wide Camera, V2 Host Camera, V3 Guest Camera; A1 Guest Mic, A2 Host Mic.",
+      ar: "فحص كل ملفات كاميرا الضيف وكاميرا المذيع وكاميرا الوايد والمايكات الخارجية، ومزامنتهم على توقيت واحد، وبناء سيكوانس جاهزة للمونتاج: V1 كاميرا الوايد، V2 كاميرا المذيع، V3 كاميرا الضيف؛ A1 مايك الضيف، A2 مايك المذيع.",
+    },
     approach: [
-      "Companion reads timecode, frame rate and audio with FFprobe (working now: Dashboard > Inspect sequence media).",
-      "Sync by embedded timecode when it agrees with audio; otherwise coarse-to-fine audio cross-correlation with drift estimation and a confidence score.",
-      "Sequence built with SequenceEditor overwrite actions at exact tick offsets, tracks renamed (26.3+), all in undoable transactions.",
+      { en: "The engine reads timecode, frame rate and audio of every file (working now: Dashboard › Inspect sequence media).",
+        ar: "المحرك بيقرا التايم كود وعدد الفريمات والصوت لكل ملف (شغال دلوقتي: الرئيسية › فحص ملفات السيكوانس)." },
+      { en: "Sync by timecode when it agrees with the audio; otherwise by matching the sound waves, with drift detection and a confidence score.",
+        ar: "المزامنة بالتايم كود لو متطابق مع الصوت، وإلا بمطابقة موجات الصوت، مع اكتشاف الانحراف ونسبة ثقة." },
+      { en: "The sequence is built with undoable Premiere actions and the tracks are named after each camera.",
+        ar: "السيكوانس بتتبني بأوامر بريمير ينفع تتراجع عنها، والتراكات بتتسمى باسم كل كاميرا." },
     ],
     limits: [
-      "There is no API to create a Premiere multicam source sequence; cameras are stacked on separate tracks instead (which is what Auto Director needs).",
-      "Track lock state cannot be read in 26.x, so the plugin only writes into sequences it creates.",
+      { en: "Premiere has no API for a multicam source sequence, so cameras are stacked on tracks (which Auto Director needs anyway).",
+        ar: "مفيش API لسيكوانس الـ Multicam الرسمية، فالكاميرات بتتحط فوق بعض على تراكات (وده المطلوب للمخرج الآلي أصلاً)." },
     ],
-    companionNeeds: ["ffprobe", "ffmpeg", "numpy"],
+    engineNeeds: ["ffprobe", "ffmpeg", "numpy"],
   },
   {
     id: "silence",
     step: 2,
-    title: "Smart Silence Cut",
-    short: "Silence",
+    title: { en: "Smart Silence Cut", ar: "حذف السكوت الذكي" },
+    short: { en: "Silence", ar: "السكوت" },
     phase: 3,
-    goal: "Find real pauses across all microphones, let the editor review them, then remove the same interval from every camera and audio track in a new PODCAST_01_SILENCE_CUT sequence.",
+    goal: {
+      en: "Find real pauses on all mics, let you review them, then remove the same interval from every camera and mic in a new PODCAST_01_SILENCE_CUT sequence.",
+      ar: "اكتشاف السكوت الحقيقي على كل المايكات، تراجعه بنفسك، وبعدين يتشال نفس الجزء من كل الكاميرات والمايكات في سيكوانس جديدة PODCAST_01_SILENCE_CUT.",
+    },
     approach: [
-      "Silero VAD + per-mic energy + transcript word timing, with protected padding around speech onsets.",
-      "One edit decision list drives every track, frame-aligned with exact tick math.",
+      { en: "Voice detection + per-mic loudness + word timing, with protected margins so words are never clipped.",
+        ar: "اكتشاف الكلام + مستوى صوت كل مايك + توقيت الكلمات، مع هوامش محمية علشان الكلام ميتقصش." },
+      { en: "Cutting uses the cut engine (test it now on the Dashboard): one plan, applied to every track, frame-exact, then verified.",
+        ar: "التقطيع بيستخدم محرك التقطيع (تقدر تختبره دلوقتي من الرئيسية): خطة واحدة على كل التراكات، مظبوطة على الفريم، وبعدين بتتراجع." },
     ],
     limits: [
-      "Premiere 26.x has no razor/split API. Cuts are rebuilt from source ranges (overwrite + trim actions); this path must pass the Test 2 checklist in Premiere before release.",
-      "Audio crossfades: no audio transition API; short fades will use Volume keyframes (to be verified).",
+      { en: "Premiere has no razor API. The cut engine rebuilds the timeline from exact segments instead, and checks the result.",
+        ar: "مفيش أمر قص (razor) في البريمير. محرك التقطيع بيعيد بناء التايم لاين من أجزاء مظبوطة بدلاً منه، وبيراجع النتيجة." },
     ],
-    companionNeeds: ["ffmpeg", "numpy", "silero_vad"],
+    engineNeeds: ["ffmpeg", "numpy", "silero_vad"],
   },
   {
     id: "director",
     step: 3,
-    title: "AI Auto Director",
-    short: "Director",
+    title: { en: "AI Auto Director", ar: "المخرج الآلي" },
+    short: { en: "Director", ar: "المخرج" },
     phase: 4,
-    goal: "Pick the camera of whoever is speaking, with minimum shot length and hysteresis, by cutting all three camera tracks at the same boundaries and disabling the clips that are not on air.",
+    goal: {
+      en: "Show the camera of whoever is talking: Guest Camera when the guest speaks, Host Camera for the host, Wide Camera when both talk. Every camera stays on the timeline; only the off-air pieces are disabled.",
+      ar: "عرض كاميرا اللي بيتكلم: كاميرا الضيف لما الضيف يتكلم، كاميرا المذيع للمذيع، وكاميرا الوايد لما الاتنين يتكلموا. كل الكاميرات فاضلة على التايم لاين، بس الأجزاء اللي مش معروضة بتتقفل.",
+    },
     approach: [
-      "Speaker activity from the isolated mics first; diarization only when mics bleed or are missing.",
-      "VideoClipTrackItem.createSetDisabledAction (25.6) toggles each segment, so every camera stays on the timeline.",
+      { en: "Speaker activity from each mic, with minimum shot length and no cut in the middle of a word.",
+        ar: "مين بيتكلم من كل مايك، مع أقل مدة للقطة ومن غير قطع في نص الكلمة." },
+      { en: "The cut engine splits all cameras at the same frames; Premiere's enable/disable clip action picks the visible one.",
+        ar: "محرك التقطيع بيقسم كل الكاميرات على نفس الفريمات، وأمر تفعيل/تعطيل الكليب في البريمير بيختار الظاهرة." },
     ],
-    limits: ["Same razor limitation as Silence Cut: segments are rebuilt, not split in place."],
-    companionNeeds: ["ffmpeg", "numpy", "silero_vad"],
+    limits: [],
+    engineNeeds: ["ffmpeg", "numpy", "silero_vad"],
   },
   {
     id: "reels",
     step: 4,
-    title: "AI Viral Clip Finder",
-    short: "Reels",
+    title: { en: "AI Viral Clip Finder", ar: "مستخرج الريلز" },
+    short: { en: "Reels", ar: "الريلز" },
     phase: 5,
-    goal: "Read the approved cut's transcript, propose reel candidates with authentic hooks and context scores, and build REEL_xx_EDIT sequences (9:16, 1:1, 4:5, 16:9).",
+    goal: {
+      en: "Read the approved cut, suggest reels with real hooks (only words that were actually said), and build REEL_xx_EDIT sequences in 9:16, 1:1, 4:5 or 16:9.",
+      ar: "قراءة النسخة المعتمدة، واقتراح ريلز ببدايات قوية (من كلام اتقال فعلاً بس)، وبناء سيكوانسات REEL_xx_EDIT بمقاس 9:16 أو 1:1 أو 4:5 أو 16:9.",
+    },
     approach: [
-      "Transcript from local Whisper; ranking by heuristics plus an optional local LLM (no cloud key).",
-      "New sequences via createSequenceWithPresetPath (26.3) + frame size settings; reframing with Motion keyframes.",
+      { en: "Local speech-to-text and ranking on your machine; no cloud key.", ar: "تحويل الكلام لنص وترتيب المقاطع على جهازك، من غير أي مفتاح سحابي." },
+      { en: "Face-aware reframing with Motion keyframes you can still edit.", ar: "إعادة تأطير حسب مكان الوش بكيفريمات Motion تقدر تعدلها." },
     ],
-    limits: ["Scores are editorial heuristics, not predictions of views."],
-    companionNeeds: ["ffmpeg", "faster_whisper", "cv2"],
+    limits: [{ en: "Scores are editorial estimates, not a promise of views.", ar: "التقييمات تقدير تحريري، مش ضمان مشاهدات." }],
+    engineNeeds: ["ffmpeg", "faster_whisper", "cv2"],
   },
   {
     id: "captions",
     step: 5,
-    title: "Smart Captions",
-    short: "Captions",
+    title: { en: "Smart Captions", ar: "الكابشن الذكي" },
+    short: { en: "Captions", ar: "الكابشن" },
     phase: 6,
-    goal: "Arabic-first captions (Egyptian and other dialects) with word timing, editable in the panel, delivered as SRT and as styled overlays.",
+    goal: {
+      en: "Arabic-first captions (Egyptian and other dialects) with word timing, editable in the panel, as SRT and styled animated captions.",
+      ar: "كابشن عربي أولاً (مصري ولهجات تانية) بتوقيت الكلمات، تعدله من البانل، كملف SRT وكابشن متحركة بستايل.",
+    },
     approach: [
-      "faster-whisper large-v3 locally; low-confidence words highlighted for review.",
-      "SRT import into the project, tested in Premiere; animated styles rendered by the companion as transparent overlays whose text stays editable in the panel.",
+      { en: "Whisper running locally; uncertain words are highlighted for review.", ar: "Whisper شغال على جهازك، والكلمات اللي مش متأكد منها بتتعلّم علشان تراجعها." },
     ],
     limits: [
-      "No 26.x API creates caption track items from text. Native captions depend on the SRT import path passing tests; otherwise SRT is imported manually.",
-      "Rendered overlays are graphics, not native text layers, and the panel will say so.",
+      { en: "Premiere has no API that creates captions from text; the SRT import path will be tested, and animated styles are rendered as graphics.",
+        ar: "مفيش API بيعمل كابشن من نص؛ هنجرب استيراد SRT، والستايلات المتحركة بتترندر كجرافيك." },
     ],
-    companionNeeds: ["ffmpeg", "faster_whisper"],
+    engineNeeds: ["ffmpeg", "faster_whisper"],
   },
   {
     id: "motion",
     step: 6,
-    title: "ATHEER Motion Library",
-    short: "Motion",
+    title: { en: "Motion Library", ar: "مكتبة الموشن" },
+    short: { en: "Motion", ar: "الموشن" },
     phase: 7,
-    goal: "One-click lower thirds, image inserts, split screens and titles at the playhead, on a free track, without overwriting anything.",
+    goal: {
+      en: "One click puts a lower third, photo card, split screen or title at the playhead, on a free track, without overwriting anything.",
+      ar: "ضغطة واحدة تحط اسم الضيف أو صورة أو سبليت سكرين أو عنوان عند المؤشر، على تراك فاضي، من غير ما يمسح حاجة.",
+    },
     approach: [
-      "SequenceEditor.insertMogrtFromPath (25.6) with collision-aware track choice.",
-      "Animation specs come from the reference videos you send: timing, easing, typography, layout.",
+      { en: "Animation details come from the reference videos you send.", ar: "تفاصيل الحركة هتتاخد من فيديوهات الريفرانس اللي هتبعتها." },
     ],
     limits: [
-      "MogrtText (programmatic text editing) arrives in Premiere 27.0. On 26.x the text is edited in Essential Graphics or the template is rendered by the companion.",
+      { en: "Editing template text from code needs Premiere 27 (you have the latest, so this is available).",
+        ar: "تعديل نص القوالب من الكود محتاج بريمير 27 (عندك آخر نسخة، فده متاح)." },
     ],
-    companionNeeds: ["ffmpeg"],
+    engineNeeds: ["ffmpeg"],
   },
   {
     id: "export",
     step: 7,
-    title: "Review & Export",
-    short: "Export",
+    title: { en: "Review & Export", ar: "المراجعة والتصدير" },
+    short: { en: "Export", ar: "التصدير" },
     phase: 8,
-    goal: "Review approved outputs and queue them to Media Encoder with your presets. Nothing is exported or published without approval.",
-    approach: ["EncoderManager.exportSequence (25.6); launchEncoder / startBatchEncode (26.3)."],
+    goal: {
+      en: "Review approved outputs and queue them to Media Encoder. Nothing is exported without your approval.",
+      ar: "مراجعة النسخ المعتمدة وإرسالها لـ Media Encoder. مفيش حاجة بتتصدّر من غير موافقتك.",
+    },
+    approach: [],
     limits: [],
-    companionNeeds: [],
+    engineNeeds: [],
   },
 ];
