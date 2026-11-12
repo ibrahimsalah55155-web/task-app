@@ -119,10 +119,11 @@ if (-not $SkipTests) {
   & (Join-Path $Work "test_harness.exe") (Join-Path $AddonDir "mag_engine.uxpaddon") 47830 stop; Must "addon stop test"
 
   Say "Testing the addon: engine dies with its host process"
-  $out = & (Join-Path $Work "test_harness.exe") (Join-Path $AddonDir "mag_engine.uxpaddon") 47831 abandon
-  $out | Write-Host
+  # (PowerShell variable names are case-insensitive: do not call this $out, it would replace $Out.)
+  $HarnessLines = & (Join-Path $Work "test_harness.exe") (Join-Path $AddonDir "mag_engine.uxpaddon") 47831 abandon
+  $HarnessLines | Write-Host
   Must "addon abandon test"
-  $EnginePid = [int](($out | Where-Object { $_ -like "PID *" }) -replace "PID ", "")
+  $EnginePid = [int](($HarnessLines | Where-Object { $_ -like "PID *" }) -replace "PID ", "")
   Start-Sleep -Seconds 3
   if (Get-Process -Id $EnginePid -ErrorAction SilentlyContinue) { throw "Engine $EnginePid survived its host process" }
   Write-Host "OK: engine $EnginePid was killed with its host"
