@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "atheer-companion"
+version = "0.1.0"
+description = "Local processing service for the ATHEER PODCAST STUDIO Premiere Pro panel"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.30,<1",
+  "websockets>=13,<16",
+]
+
+[project.optional-dependencies]
+# Phase 1 needs none of these. They are listed so later phases install from one place.
+# Each one is evaluated in docs/FEASIBILITY_AUDIT.md before it becomes a hard requirement.
+ai = [
+  "numpy>=1.26",
+  "faster-whisper>=1.1",
+  "silero-vad>=5.1",
+]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[project.scripts]
+atheer-companion = "atheer_companion.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["atheer_companion*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

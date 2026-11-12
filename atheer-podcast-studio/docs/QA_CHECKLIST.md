@@ -1,0 +1,36 @@
+# Manual QA checklist (Premiere Pro 2026)
+
+Run on a real Premiere install. Record Premiere version + build (Settings ›
+Copy diagnostics), OS, pass/fail and notes. An item is "Tested in Premiere"
+in `COMPATIBILITY.md` only after it passes here.
+
+## Phase 1 — Foundation
+
+| ID | Steps | Expected |
+|---|---|---|
+| P1-01 | Load `plugin/dist/manifest.json` in UDT, open the panel, dock it in a narrow column (~280 px) | Panel renders, no console errors, nav wraps, nothing overflows sideways |
+| P1-02 | Header pills with no project open | "Pr 26.x" green (26.3+) or amber; Project card says "Open a project" |
+| P1-03 | Open a project with a 3-camera sequence; open the sequence | Project card lists the sequence, frame size, fps (check 23.976 / 25 / 29.97), duration, track labels V1.. / A1.. match the timeline headers, clip counts match |
+| P1-04 | Move the playhead, press Refresh | Playhead timecode matches the Program Monitor (non-drop display) |
+| P1-05 | Switch to another sequence in the Timeline | Panel refreshes by itself (events) within ~1 s |
+| P1-06 | Start companion, pair with the code. In the companion window note the line `first request from Origin ...` | Pairing succeeds. **Record the Origin value.** |
+| P1-07 | (macOS) Same as P1-06 | Requests to `http://127.0.0.1:47820` succeed. If they fail, record the error |
+| P1-08 | Press **Inspect sequence media** | Progress bar, then one row per file with TC/fps/audio; offline media reported as missing |
+| P1-09 | Press it again | Rows marked "cached", finishes faster |
+| P1-10 | Start inspection on a long file set, press **Cancel** | Job ends as cancelled; panel stays usable |
+| P1-11 | Close the companion window while the panel is open | Within ~5 s the pill turns red "Companion off"; restart → returns to "Companion" without re-pairing |
+| P1-12 | **Create ATHEER bins** | Bin "ATHEER PODCAST STUDIO" with 01–06 sub-bins. Edit › Undo removes them (2 steps). Pressing again creates nothing |
+| P1-13 | **Add test marker** | Comment marker at the playhead named "ATHEER check". One Undo removes it |
+| P1-14 | Restart Premiere, open panel | Still paired (no code needed); last view remembered |
+| P1-15 | Unplug the drive holding one camera file, inspect | That file: "File not found or drive disconnected"; others still inspected |
+
+## Later phases (to be filled per phase)
+
+| ID | Question from the audit |
+|---|---|
+| P2-03 | Linked audio placement by `createOverwriteItemAction` |
+| P3-01 | Trim actions precision and cost at 1,000+ actions |
+| P3-02 | Volume keyframes on audio clips |
+| P4-02 | Disabled upper-track clips reveal the enabled one (playback + export) |
+| P6-01 | SRT import + placement creates a caption track |
+| P7-02 | `ComponentParam.createKeyframe(string)` edits MOGRT text on 26.x |

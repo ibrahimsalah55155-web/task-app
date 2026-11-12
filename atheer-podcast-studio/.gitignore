@@ -1,0 +1,9 @@
+node_modules/
+plugin/dist/
+*.ccx
+__pycache__/
+*.pyc
+.pytest_cache/
+companion/bin/
+companion/*.egg-info/
+.venv/
