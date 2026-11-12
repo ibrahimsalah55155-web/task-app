@@ -290,11 +290,10 @@ body {
 
 /* ---- motion library ---- */
 .tpl-grid { display: flex; flex-direction: row; flex-wrap: wrap; margin-top: 6px; }
-.tpl { width: 31%; margin: 0 2% 8px 0; border: 1px solid var(--line); border-radius: 6px; padding: 4px; background-color: var(--bg); }
+.tpl { width: 29%; margin: 0 2% 8px 0; border: 1px solid var(--line); border-radius: 6px; padding: 4px; background-color: var(--bg); }
 .tpl.is-active { border-color: var(--accent); }
-.tpl-thumb { height: 120px; border-radius: 4px; background-color: #3a4152; overflow: hidden; }
-.tpl-thumb.wide { height: 60px; }
-.tpl-img { width: 100%; height: 100%; }
+.tpl-thumb { height: 64px; border-radius: 4px; background-color: #3a4152; overflow: hidden; }
+.tpl-img { width: 100%; height: 100%; object-fit: contain; }
 .tpl-name { font-size: 10px; margin-top: 4px; text-align: center; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tpl.is-active .tpl-name { color: var(--accent); }
 .preview { height: 300px; border-radius: 6px; background-color: #3a4152; overflow: hidden; display: flex; justify-content: center; margin-bottom: 8px; }

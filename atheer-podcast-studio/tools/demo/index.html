@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Premiere (simulation) — Multimedia & AI Group</title>
+<link rel="stylesheet" href="/demo.css" />
+<link rel="stylesheet" href="/panel/styles.css" />
+<script>var DEMO_MEDIA = "__MEDIA__";</script>
+<script src="/host.js"></script>
+<script defer src="/panel/index.js"></script>
+</head>
+<body>
+  <div class="ppro">
+    <div class="menubar">
+      <span class="appname">Premiere Pro</span>
+      <span>File</span><span>Edit</span><span>Clip</span><span>Sequence</span><span>Markers</span><span>Graphics</span><span>View</span><span>Window</span><span>Help</span>
+      <span class="sim">محاكاة لشاشة بريمير للشرح — البانل والمحرك والجرافيكس حقيقيين</span>
+    </div>
+    <div class="workspace">
+      <div class="left">
+        <div class="pane bins-pane"><div class="pane-h">Project: Podcast EP12</div><div id="bins" class="pane-b"></div></div>
+      </div>
+      <div class="center">
+        <div class="pane monitor-pane">
+          <div class="pane-h">Program: <span id="tl-name2">REEL_01_EDIT</span></div>
+          <div class="monitor">
+            <div class="frame">
+              <video id="bg" src="/media/clean_guest.webm" muted playsinline loop></video>
+              <div id="overlays"></div>
+            </div>
+          </div>
+          <div class="mon-foot"><span id="tc" class="tc">00:00:00:00</span></div>
+        </div>
+        <div class="pane timeline-pane">
+          <div class="pane-h">Timeline: <span id="tl-name">REEL_01_EDIT</span></div>
+          <div id="tl-body" class="tl-body"></div>
+        </div>
+      </div>
+      <div class="right pane">
+        <div class="pane-h">Multimedia & AI Group</div>
+        <div class="panel-host"><div id="app"></div></div>
+      </div>
+    </div>
+    <div id="caption" class="vo-caption"></div>
+  </div>
+</body>
+</html>

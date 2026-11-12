@@ -65,7 +65,8 @@ def draw_frame(template_id: str, fields: dict[str, Any], width: int, height: int
 
 
 def preview_png(template_id: str, fields: dict[str, Any], width: int, height: int,
-                duration: float | None = None, opts: dict[str, Any] | None = None, max_width: int = 360) -> str:
+                duration: float | None = None, opts: dict[str, Any] | None = None, max_width: int = 360,
+                crop: bool = False) -> str:
     """Base64 PNG of the template at its 'hold' moment, scaled down for the panel."""
     tpl = TEMPLATES.get(template_id)
     if not tpl:
@@ -73,6 +74,20 @@ def preview_png(template_id: str, fields: dict[str, Any], width: int, height: in
     dur = duration or tpl.default_duration
     frame = draw_frame(template_id, fields, width, height, tpl.hold_time(dur), dur, 25, opts)
     img = Image.fromarray(frame.to_rgba8(), "RGBA")
+    if crop and not tpl.full_frame:
+        bbox = img.getchannel("A").point(lambda a: 255 if a > 8 else 0).getbbox()
+        if bbox:
+            pad = int(min(width, height) * 0.04)
+            x0, y0, x1, y1 = max(0, bbox[0] - pad), max(0, bbox[1] - pad), min(width, bbox[2] + pad), min(height, bbox[3] + pad)
+            # widen to a 16:9 box so every card thumbnail has the same shape
+            cw, ch = x1 - x0, y1 - y0
+            if cw / max(ch, 1) < 16 / 9:
+                extra = int(ch * 16 / 9) - cw
+                x0, x1 = max(0, x0 - extra // 2), min(width, x1 + extra - extra // 2)
+            else:
+                extra = int(cw * 9 / 16) - ch
+                y0, y1 = max(0, y0 - extra // 2), min(height, y1 + extra - extra // 2)
+            img = img.crop((x0, y0, x1, y1))
     if img.width > max_width:
         img = img.resize((max_width, round(img.height * max_width / img.width)), Image.LANCZOS)
     buf = io.BytesIO()

@@ -98,13 +98,13 @@ export class MotionView {
   private async loadThumbs(): Promise<void> {
     for (const tpl of this.templates ?? []) {
       try {
-        this.thumbs[tpl.id] = await this.host.client().graphicPreview(this.request(tpl.id));
+        this.thumbs[tpl.id] = await this.host.client().graphicPreview(this.request(tpl.id, { crop: true }));
         this.host.rerender();
       } catch (e) {
         log.warn(`Preview of ${tpl.id} failed`, e);
       }
     }
-    this.previews[this.selected] = this.thumbs[this.selected] ?? "";
+    await this.refreshPreview();
   }
 
   private schedulePreview(): void {
@@ -247,16 +247,17 @@ export class MotionView {
     const tpl = this.templates.find((x) => x.id === this.selected) ?? this.templates[0]!;
     const seq = this.host.sequence();
     const vals = this.values[tpl.id] ?? {};
-    const preview = this.previews[tpl.id] ?? this.thumbs[tpl.id];
+    const preview = this.previews[tpl.id];
     const portrait = (seq?.height ?? 1920) >= (seq?.width ?? 1080);
 
     const grid = h("div", { class: "tpl-grid" }, this.templates.map((x) =>
       h("div", { class: `tpl${x.id === tpl.id ? " is-active" : ""}`, role: "button", tabindex: 0, onclick: () => {
         this.selected = x.id;
         if (this.editing != null && this.placed[this.editing]?.template !== x.id) this.editing = null;
+        if (!this.previews[x.id]) this.schedulePreview();
         this.host.rerender();
       } },
-        h("div", { class: `tpl-thumb${portrait ? "" : " wide"}` },
+        h("div", { class: "tpl-thumb" },
           this.thumbs[x.id] ? h("img", { class: "tpl-img", src: `data:image/png;base64,${this.thumbs[x.id]}` }) : null),
         h("div", { class: "tpl-name" }, pick(x.title)))));
 

@@ -77,6 +77,7 @@ class GraphicBody(BaseModel):
     accent: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
     icon: str | None = Field(default=None, max_length=1000)
     outDir: str | None = Field(default=None, max_length=1000)
+    crop: bool = False  # previews only: crop to the graphic (template cards)
 
 
 def create_app(config: Config, store: Store | None = None, auth: Auth | None = None) -> FastAPI:
@@ -210,7 +211,8 @@ def create_app(config: Config, store: Store | None = None, auth: Auth | None = N
     async def graphics_preview(body: GraphicBody) -> dict[str, Any]:
         try:
             png = await asyncio.to_thread(preview_png, body.template, body.fields, body.width, body.height,
-                                          body.duration, {"accent": body.accent, "icon": body.icon})
+                                          body.duration, {"accent": body.accent, "icon": body.icon},
+                                          360, body.crop)
         except RenderError as e:
             raise HTTPException(400, detail={"code": "bad_request", "message": str(e)}) from e
         return {"png": png}
@@ -219,7 +221,7 @@ def create_app(config: Config, store: Store | None = None, auth: Auth | None = N
     async def submit_render(body: GraphicBody) -> dict[str, Any]:
         if body.template not in TEMPLATES:
             raise HTTPException(400, detail={"code": "bad_request", "message": f"unknown template {body.template}"})
-        job = jobs.submit("render_graphic", body.model_dump())
+        job = jobs.submit("render_graphic", body.model_dump(exclude={"crop"}))
         return {"job": job.to_json(include_result=False)}
 
     @app.get(PREFIX + "/jobs", dependencies=authed)

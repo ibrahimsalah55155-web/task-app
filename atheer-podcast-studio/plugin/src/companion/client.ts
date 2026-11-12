@@ -156,6 +156,7 @@ export interface GraphicRequest {
   accent?: string;
   icon?: string;
   outDir?: string;
+  crop?: boolean;
 }
 
 export interface GraphicResult {
