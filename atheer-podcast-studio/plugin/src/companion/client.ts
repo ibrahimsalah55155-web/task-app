@@ -130,6 +130,43 @@ export interface ProbeResult {
   cacheHits: number;
 }
 
+export interface TemplateField {
+  id: string;
+  label: { en: string; ar: string };
+  default: string;
+  kind: "text" | "choice";
+  options?: { value: string; label: { en: string; ar: string } }[];
+}
+
+export interface GraphicTemplate {
+  id: string;
+  title: { en: string; ar: string };
+  fields: TemplateField[];
+  defaultDuration: number;
+  fullFrame: boolean;
+}
+
+export interface GraphicRequest {
+  template: string;
+  fields: Record<string, string>;
+  width: number;
+  height: number;
+  fps: number;
+  duration?: number;
+  accent?: string;
+  icon?: string;
+  outDir?: string;
+}
+
+export interface GraphicResult {
+  path: string;
+  template: string;
+  fields: Record<string, string>;
+  duration: number;
+  frames: number;
+  cached: boolean;
+}
+
 export const TERMINAL_STATES: ReadonlySet<JobState> = new Set(["succeeded", "failed", "cancelled"]);
 
 export type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
@@ -268,6 +305,18 @@ export class CompanionClient {
 
   async cancelJob(id: string): Promise<void> {
     await this.request("POST", `/api/v1/jobs/${encodeURIComponent(id)}/cancel`);
+  }
+
+  async graphicTemplates(): Promise<GraphicTemplate[]> {
+    return (await this.request<{ templates: GraphicTemplate[] }>("GET", "/api/v1/graphics/templates")).templates;
+  }
+
+  async graphicPreview(req: GraphicRequest): Promise<string> {
+    return (await this.request<{ png: string }>("POST", "/api/v1/graphics/preview", { body: req, timeoutMs: 20000 })).png;
+  }
+
+  async submitRender(req: GraphicRequest): Promise<Job<GraphicResult>> {
+    return (await this.request<{ job: Job<GraphicResult> }>("POST", "/api/v1/jobs/render_graphic", { body: req })).job;
   }
 
   async logs(tail = 200): Promise<string[]> {

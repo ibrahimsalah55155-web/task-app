@@ -22,6 +22,7 @@ import { CHILD_BINS, ROOT_BIN, addMarkerAtPlayhead, ensureProjectBins } from "..
 import { type ProjectSnapshot, getActiveProject, readProjectSnapshot } from "../ppro/project.ts";
 import { button, card, h, pill, progress, replace, row, type Tone } from "./dom.ts";
 import { type Key, type Lang, defaultLang, getLang, isRtl, pick, setLang, t } from "./i18n.ts";
+import { MotionView } from "./motion.ts";
 import { STAGES } from "./stages.ts";
 
 declare const __PLUGIN_VERSION__: string;
@@ -66,6 +67,7 @@ export class PanelApp {
   private visible = true;
   private readonly expanded = new Set<string>();
   private renderedView: string | null = null;
+  private readonly motion: MotionView;
 
   constructor(root: HTMLElement, tokens: TokenStore) {
     this.root = root;
@@ -86,6 +88,16 @@ export class PanelApp {
       probe: { job: null, result: null, error: null, following: false },
       cut: { running: false, step: null, fraction: 0, report: null, error: null },
     };
+    this.motion = new MotionView({
+      client: () => this.client,
+      engineReady: () => this.state.engine.status === "running",
+      sequence: () => this.state.project?.activeSequence ?? null,
+      projectPath: () => this.state.project?.path ?? null,
+      prefs: this.prefs,
+      savePrefs: () => savePrefs(this.prefs),
+      rerender: () => this.render(),
+      notify: (tone, text) => this.notify(tone, text),
+    });
   }
 
   // ---- lifecycle ------------------------------------------------------------
@@ -440,7 +452,8 @@ export class PanelApp {
         h("div", { class: "content" },
           view === "dashboard" ? this.renderDashboard()
             : view === "settings" ? this.renderSettings()
-              : this.renderStage(view)),
+              : view === "motion" ? this.motion.render()
+                : this.renderStage(view)),
         h("div", { class: "log", id: "log" })));
     const content = this.root.querySelector(".content");
     if (content && keepScroll) content.scrollTop = keepScroll;
@@ -683,6 +696,22 @@ export class PanelApp {
             savePrefs(this.prefs);
           } }, (["debug", "info", "warn", "error"] as const).map((l) => h("option", { value: l, selected: l === this.prefs.logLevel }, l)))),
         h("div", { class: "actions" }, button(t("copyDiagnostics"), () => void this.copyDiagnostics()))),
+      card(t("logo"), null,
+        row(t("logo"), h("span", { class: "path ltr" }, this.prefs.logoPath ?? t("defaultIcon"))),
+        h("p", { class: "muted small" }, t("logoHint")),
+        h("div", { class: "kv" }, h("span", { class: "kv-k" }, t("accentColor")),
+          h("input", { class: "input field-num ltr", type: "text", value: this.prefs.accent, maxlength: 7,
+            onchange: (ev: Event) => {
+              const v = (ev.target as HTMLInputElement).value.trim();
+              if (/^#[0-9a-fA-F]{6}$/.test(v)) {
+                this.prefs.accent = v;
+                savePrefs(this.prefs);
+                this.motion.invalidateAll();
+              }
+            } })),
+        h("div", { class: "actions" },
+          button(t("chooseLogo"), () => void this.motion.chooseLogo()),
+          button(t("clearLogo"), () => this.motion.clearLogo(), { disabled: !this.prefs.logoPath }))),
       card(t("settingsEngine"), pill(e.status, e.status === "running" ? "ok" : "warn"),
         row(t("address"), h("span", { class: "ltr" }, this.client.baseUrl)),
         h("div", { class: "actions" },

@@ -106,6 +106,19 @@ export class FakeClip {
   readonly id = `clip-${++idCounter}`;
   parent: FakeFolder | null = null;
   sub: { from: FakeClip; inT: number; outT: number; video: boolean; audio: boolean } | null = null;
+  lengthTicks = 0; // for imported files (graphics)
+  relinkedTo: string | null = null;
+  async canChangeMediaPath() {
+    return true;
+  }
+  async changeMediaFilePath(p: string) {
+    this.path = p;
+    this.relinkedTo = p;
+    return true;
+  }
+  async refreshMedia() {
+    return true;
+  }
   getId() {
     return this.id;
   }
@@ -203,8 +216,10 @@ export class FakeSequence {
   async getTimebase() {
     return String(this.fpsTicks);
   }
+  frameW = 1920;
+  frameH = 1080;
   async getFrameSize() {
-    return { width: 1920, height: 1080 };
+    return { width: this.frameW, height: this.frameH };
   }
   async getEndTime() {
     return new FakeTickTime(this.end);
@@ -252,6 +267,8 @@ export class FakeSequence {
       }));
       const clone = new FakeSequence(`${this.name} Copy`, this.video.map(copy), this.audio.map(copy), this.fpsTicks);
       clone.end = this.end;
+      clone.frameW = this.frameW;
+      clone.frameH = this.frameH;
       clone.guid = { toString: () => `guid-${++idCounter}` };
       clone.project = this.project;
       this.project!.sequences.push(clone);
@@ -273,6 +290,18 @@ export class FakeProject {
     this.active = seq;
     if (seq) seq.project = this;
     fakeRoot = this.root;
+  }
+  imports: string[] = [];
+  importLengthTicks = TPS * 6;
+  async importFiles(paths: string[], _suppress: boolean, bin: FakeFolder) {
+    for (const p of paths) {
+      this.imports.push(p);
+      const c = new FakeClip(p.split(/[\\/]/).pop()!, p);
+      c.lengthTicks = this.importLengthTicks;
+      c.parent = bin;
+      bin.items.push(c);
+    }
+    return true;
   }
   async openSequence(seq: FakeSequence) {
     this.opened = seq;
@@ -395,11 +424,23 @@ function fakeEditor(seq: FakeSequence) {
     createOverwriteItemAction(clip: FakeClip, time: FakeTickTime, v: number, a: number) {
       requireLock("createOverwriteItemAction");
       return new Action(`overwrite:${clip.name}`, () => {
-        const sub = clip.sub!;
+        if (!clip.sub) {
+          overwrite(seq.video[v]!, new FakeTrackItem(clip, time.ticksNumber, time.ticksNumber + clip.lengthTicks, 0));
+          return;
+        }
+        const sub = clip.sub;
         let len = sub.outT - sub.inT;
         if (editorFaults.wrongLength) len -= seq.fpsTicks;
         if (sub.video) overwrite(seq.video[v]!, new FakeTrackItem(clip, time.ticksNumber, time.ticksNumber + len, 0));
         if (sub.audio) overwrite(seq.audio[a]!, new FakeTrackItem(clip, time.ticksNumber, time.ticksNumber + len, 0));
+      });
+    },
+    createInsertProjectItemAction(clip: FakeClip, time: FakeTickTime, v: number, _a: number, limitShift: boolean) {
+      requireLock("createInsertProjectItemAction");
+      if (!limitShift) throw new Error("graphics insert must not shift other tracks");
+      return new Action(`insert:${clip.name}`, () => {
+        while (seq.video.length <= v) seq.video.push(new FakeTrack(`Video ${seq.video.length + 1}`, []));
+        overwrite(seq.video[v]!, new FakeTrackItem(clip, time.ticksNumber, time.ticksNumber + clip.lengthTicks, 0));
       });
     },
     createRemoveItemsAction(sel: { items: FakeTrackItem[] }, ripple: boolean) {

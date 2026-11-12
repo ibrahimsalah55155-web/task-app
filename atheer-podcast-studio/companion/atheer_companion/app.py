@@ -9,6 +9,7 @@ import asyncio
 import logging
 import time
 from collections import deque
+from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -21,6 +22,8 @@ from .auth import Auth, PairingError
 from .config import Config
 from .jobs import JobManager
 from .media import discover_tools
+from .graphics.render import RenderError, preview_png, render_video
+from .graphics.templates import TEMPLATES
 from .probe_job import make_probe_job
 from .store import Store
 from .system import capabilities
@@ -64,6 +67,18 @@ class ProbeBody(BaseModel):
     paths: list[str] = Field(min_length=1, max_length=500)
 
 
+class GraphicBody(BaseModel):
+    template: str = Field(max_length=40)
+    fields: dict[str, str] = Field(default_factory=dict)
+    width: int = Field(default=1080, ge=64, le=8192)
+    height: int = Field(default=1920, ge=64, le=8192)
+    fps: float = Field(default=25, ge=12, le=120)  # 29.97 etc. allowed
+    duration: float | None = Field(default=None, ge=0.2, le=120)
+    accent: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    icon: str | None = Field(default=None, max_length=1000)
+    outDir: str | None = Field(default=None, max_length=1000)
+
+
 def create_app(config: Config, store: Store | None = None, auth: Auth | None = None) -> FastAPI:
     config.ensure_dirs()
     store = store or Store(config.db_path)
@@ -71,6 +86,25 @@ def create_app(config: Config, store: Store | None = None, auth: Auth | None = N
     tools = discover_tools(config.ffmpeg, config.ffprobe)
     jobs = JobManager(max_workers=config.max_workers)
     jobs.register("probe", make_probe_job(store, lambda: tools.ffprobe, config.probe_timeout_s))
+
+    def graphics_dir(requested: str | None) -> Path:
+        if requested:
+            d = Path(requested)
+            if d.is_absolute():
+                try:
+                    d.mkdir(parents=True, exist_ok=True)
+                    return d
+                except OSError:
+                    log.warning("cannot use graphics folder %s; using the engine folder", d)
+        return config.data_dir / "graphics"
+
+    def render_graphic_job(ctx, params):
+        body = GraphicBody(**params)
+        return render_video(tools.ffmpeg, body.template, body.fields, body.width, body.height, body.fps,
+                            body.duration, graphics_dir(body.outDir), {"accent": body.accent, "icon": body.icon},
+                            progress=lambda x: ctx.progress(x, "Rendering"), cancel=ctx.cancel_event)
+
+    jobs.register("render_graphic", render_graphic_job)
     seen_origins: deque[str] = deque(maxlen=20)
     started_at = time.time()
 
@@ -166,6 +200,26 @@ def create_app(config: Config, store: Store | None = None, auth: Auth | None = N
     @app.post(PREFIX + "/jobs/probe", dependencies=authed, status_code=202)
     async def submit_probe(body: ProbeBody) -> dict[str, Any]:
         job = jobs.submit("probe", {"paths": body.paths})
+        return {"job": job.to_json(include_result=False)}
+
+    @app.get(PREFIX + "/graphics/templates", dependencies=authed)
+    async def graphics_templates() -> dict[str, Any]:
+        return {"templates": [t.describe() for t in TEMPLATES.values()]}
+
+    @app.post(PREFIX + "/graphics/preview", dependencies=authed)
+    async def graphics_preview(body: GraphicBody) -> dict[str, Any]:
+        try:
+            png = await asyncio.to_thread(preview_png, body.template, body.fields, body.width, body.height,
+                                          body.duration, {"accent": body.accent, "icon": body.icon})
+        except RenderError as e:
+            raise HTTPException(400, detail={"code": "bad_request", "message": str(e)}) from e
+        return {"png": png}
+
+    @app.post(PREFIX + "/jobs/render_graphic", dependencies=authed, status_code=202)
+    async def submit_render(body: GraphicBody) -> dict[str, Any]:
+        if body.template not in TEMPLATES:
+            raise HTTPException(400, detail={"code": "bad_request", "message": f"unknown template {body.template}"})
+        job = jobs.submit("render_graphic", body.model_dump())
         return {"job": job.to_json(include_result=False)}
 
     @app.get(PREFIX + "/jobs", dependencies=authed)

@@ -101,7 +101,7 @@ def test_capabilities_report_tools_and_modules(authed):
     caps = authed.get("/api/v1/capabilities").json()
     assert "ffprobe" in caps["tools"]
     assert "faster_whisper" in caps["modules"]
-    assert caps["jobKinds"] == ["probe"]
+    assert caps["jobKinds"] == ["probe", "render_graphic"]
 
 
 @needs_ffmpeg

@@ -115,6 +115,15 @@ if (-not $SkipTests) {
   & (Join-Path $Py "python.exe") -m atheer_companion --version; Must "engine --version"
   & (Join-Path $FfDir "ffprobe.exe") -hide_banner -version | Select-Object -First 1
 
+  Say "Testing the graphics renderer (Arabic shaping + ProRes 4444) with the packaged Python and FFmpeg"
+  $RenderTest = @"
+from pathlib import Path
+from atheer_companion.graphics.render import render_video
+r = render_video(r'$FfDir\ffmpeg.exe', 'lower_third', {'name': 'د. اختبار'}, 1080, 1920, 25, 2.0, Path(r'$Work\gfx'))
+print('rendered', r['frames'], 'frames ->', r['path'])
+"@
+  & (Join-Path $Py "python.exe") -c $RenderTest; Must "graphics render test"
+
   Say "Testing the addon: start, health, stop"
   & (Join-Path $Work "test_harness.exe") (Join-Path $AddonDir "mag_engine.uxpaddon") 47830 stop; Must "addon stop test"
 

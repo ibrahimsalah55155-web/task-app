@@ -5,6 +5,8 @@ export interface Prefs {
   companionUrl: string;
   logLevel: "debug" | "info" | "warn" | "error";
   lastView: string;
+  accent: string;
+  logoPath: string | null;
 }
 
 const KEY = "mag.prefs.v1";
@@ -14,6 +16,8 @@ export const DEFAULT_PREFS: Prefs = {
   companionUrl: "http://127.0.0.1:47820",
   logLevel: "info",
   lastView: "dashboard",
+  accent: "#EC797B",
+  logoPath: null,
 };
 
 function storage(): Storage | null {

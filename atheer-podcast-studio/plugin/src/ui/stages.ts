@@ -133,8 +133,8 @@ export const STAGES: StageDef[] = [
       { en: "Animation details come from the reference videos you send.", ar: "تفاصيل الحركة هتتاخد من فيديوهات الريفرانس اللي هتبعتها." },
     ],
     limits: [
-      { en: "Editing template text from code needs Premiere 27 (you have the latest, so this is available).",
-        ar: "تعديل نص القوالب من الكود محتاج بريمير 27 (عندك آخر نسخة، فده متاح)." },
+      { en: "Graphics are rendered by the built-in engine as transparent video; text is edited in the panel.",
+        ar: "الجرافيك بيتعمل من المحرك كفيديو شفاف، والنص بيتعدّل من البانل." },
     ],
     engineNeeds: ["ffmpeg"],
   },
