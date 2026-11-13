@@ -107,6 +107,7 @@ def create_app(config: Config, store: Store | None = None, auth: Auth | None = N
 
     jobs.register("render_graphic", render_graphic_job)
     seen_origins: deque[str] = deque(maxlen=20)
+    seen_clients: set[tuple] = set()
     started_at = time.time()
 
     @asynccontextmanager
@@ -125,8 +126,14 @@ def create_app(config: Config, store: Store | None = None, auth: Auth | None = N
 
     @app.middleware("http")
     async def guard(request: Request, call_next):
+        client_key = (request.headers.get("user-agent", ""), request.headers.get("origin"), request.headers.get("host"))
+        if client_key not in seen_clients:
+            seen_clients.add(client_key)
+            log.info("first request from a client: user-agent=%r origin=%r host=%r path=%s",
+                     client_key[0][:120], client_key[1], client_key[2], request.url.path)
         # DNS-rebinding guard: only literal loopback host names are served.
         if not _host_ok(request.headers.get("host")):
+            log.warning("refused Host header %r", request.headers.get("host"))
             return JSONResponse({"error": {"code": "bad_host", "message": "Loopback only"}}, status_code=421)
         origin = request.headers.get("origin")
         if origin is not None and origin not in seen_origins:

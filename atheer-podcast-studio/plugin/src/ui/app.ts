@@ -12,6 +12,7 @@ import { CompanionClient, CompanionError, type Capabilities, type Health, type J
   type TokenStore } from "../companion/client.ts";
 import { type PluginFiles, canAutostart, connectAutostart, portReport, tryPorts, uxpPluginFiles } from "../companion/autostart.ts";
 import { type EngineAddon, loadAddonAsync, startBuiltInEngine } from "../companion/engine.ts";
+import { transportInfo } from "../companion/client.ts";
 import { errorMessage, formatEntry, getEntries, logger, onLog, setLogLevel } from "../core/log.ts";
 import { type Prefs, loadPrefs, savePrefs } from "../core/prefs.ts";
 import { formatDuration, formatFps, ticksToTimecode } from "../core/time.ts";
@@ -494,6 +495,7 @@ export class PanelApp {
       `Engine addon: ${this.addon ? this.safeAddonInfo() : `not used${this.addonProblem ? ` (${this.addonProblem})` : ""}`}`,
       `Origins seen by engine: ${(s.engine.caps?.seenOrigins ?? []).join(", ") || "n/a"}`,
       `Engine ports: ${portReport()}`,
+      `Transport: ${transportInfo.used} (fetch error: ${transportInfo.fetchError || "none"}; xhr error: ${transportInfo.xhrError || "none"})`,
       "Capabilities:",
       ...s.caps.map((c) => `  ${c.status.padEnd(24)} ${c.minVersion.padEnd(5)} ${c.label}`),
       `Project: ${s.project?.name ?? "none"} | sequence: ${s.project?.activeSequence?.name ?? "none"}`,

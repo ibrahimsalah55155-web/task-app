@@ -81,3 +81,33 @@ test("launcher exports are found directly, in a promise or under default; anythi
   assert.match(describeAddon(Promise.resolve(1)), /proto=\[.*then/);
   delete (globalThis as { require?: unknown }).require;
 });
+
+test("panel requests fall back to XMLHttpRequest when fetch cannot reach localhost, and stay on it", async () => {
+  const { panelFetch, transportInfo } = await import("../src/companion/client.ts");
+  const g = globalThis as Record<string, unknown>;
+  const savedFetch = g.fetch;
+  const savedXhr = g.XMLHttpRequest;
+  let fetchCalls = 0;
+  let xhrCalls = 0;
+  g.fetch = async () => { fetchCalls++; throw new TypeError("Network request failed"); };
+  g.XMLHttpRequest = class {
+    status = 0; responseText = ""; onload: (() => void) | null = null; onerror: (() => void) | null = null; ontimeout = null;
+    private url = "";
+    open(_m: string, url: string) { this.url = url; }
+    setRequestHeader() {}
+    send() { xhrCalls++; this.status = 200; this.responseText = JSON.stringify({ service: "atheer-companion", url: this.url }); setTimeout(() => this.onload?.(), 0); }
+  };
+  try {
+    const r = await panelFetch("http://127.0.0.1:47820/api/v1/health", { method: "GET", signal: new AbortController().signal });
+    assert.equal(r.status, 200);
+    assert.equal((JSON.parse(await r.text()) as { service: string }).service, "atheer-companion");
+    assert.equal(transportInfo.used, "xhr");
+    await panelFetch("http://127.0.0.1:47820/api/v1/health", { method: "GET" });
+    assert.equal(fetchCalls, 1, "after a fetch failure, XHR is used directly");
+    assert.equal(xhrCalls, 2);
+  } finally {
+    g.fetch = savedFetch;
+    g.XMLHttpRequest = savedXhr;
+    transportInfo.used = "fetch";
+  }
+});

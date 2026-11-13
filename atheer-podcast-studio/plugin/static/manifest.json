@@ -1,7 +1,7 @@
 {
   "id": "com.multimediaai.podcaststudio",
   "name": "Multimedia & AI Group",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "main": "index.html",
   "manifestVersion": 5,
   "host": {
@@ -12,18 +12,7 @@
     "localFileSystem": "request",
     "clipboard": "readAndWrite",
     "network": {
-      "domains": [
-        "http://127.0.0.1:47820",
-        "ws://127.0.0.1:47820",
-        "http://127.0.0.1:47821",
-        "ws://127.0.0.1:47821",
-        "http://127.0.0.1:47822",
-        "ws://127.0.0.1:47822",
-        "http://127.0.0.1:47823",
-        "ws://127.0.0.1:47823",
-        "http://localhost:47820",
-        "ws://localhost:47820"
-      ]
+      "domains": "all"
     },
     "launchProcess": {
       "schemes": [

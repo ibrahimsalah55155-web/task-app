@@ -275,6 +275,54 @@ export interface ClientOptions {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/** XMLHttpRequest as a fetch() stand-in (UXP supports both; some hosts refuse one of them for localhost). */
+export function xhrFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open((init.method ?? "GET").toUpperCase(), url, true);
+    for (const [k, v] of Object.entries((init.headers ?? {}) as Record<string, string>)) xhr.setRequestHeader(k, v);
+    xhr.onload = () => {
+      const text = String(xhr.responseText ?? "");
+      resolve({
+        ok: xhr.status >= 200 && xhr.status < 300,
+        status: xhr.status,
+        text: async () => text,
+        json: async () => JSON.parse(text),
+      } as unknown as Response);
+    };
+    xhr.onerror = () => reject(new TypeError(`XHR network error (status ${xhr.status})`));
+    xhr.ontimeout = () => reject(new TypeError("XHR timeout"));
+    xhr.send((init.body as string | undefined) ?? null);
+  });
+}
+
+/** Which transport reached the engine last (for diagnostics). */
+export const transportInfo = { used: "fetch", fetchError: "" as string, xhrError: "" as string };
+
+/**
+ * fetch() first; if it fails at the network level (not an HTTP error), try XMLHttpRequest once and
+ * keep using whichever worked. No AbortSignal is passed: not every UXP version accepts one.
+ */
+export const panelFetch: FetchFn = async (url, init) => {
+  const plain: RequestInit = { method: init?.method, headers: init?.headers, body: init?.body };
+  const useXhr = transportInfo.used === "xhr" && typeof XMLHttpRequest !== "undefined";
+  try {
+    return useXhr ? await xhrFetch(url, plain) : await fetch(url, plain);
+  } catch (first) {
+    if (typeof XMLHttpRequest === "undefined") throw first;
+    const firstMsg = errorMessage(first);
+    try {
+      const r = useXhr ? await fetch(url, plain) : await xhrFetch(url, plain);
+      transportInfo.used = useXhr ? "fetch" : "xhr";
+      return r;
+    } catch (second) {
+      if (useXhr) { transportInfo.xhrError = firstMsg; transportInfo.fetchError = errorMessage(second); }
+      else { transportInfo.fetchError = firstMsg; transportInfo.xhrError = errorMessage(second); }
+      throw new TypeError(`fetch: ${transportInfo.fetchError}; xhr: ${transportInfo.xhrError}`);
+    }
+  }
+};
+
 export class CompanionClient {
   baseUrl: string;
   readonly tokens: TokenStore;
@@ -284,7 +332,7 @@ export class CompanionClient {
   constructor(opts: ClientOptions = {}) {
     this.baseUrl = (opts.baseUrl ?? DEFAULT_COMPANION_URL).replace(/\/+$/, "");
     this.tokens = opts.tokens ?? new MemoryTokenStore();
-    this.fetchFn = opts.fetchFn ?? ((url, init) => fetch(url, init));
+    this.fetchFn = opts.fetchFn ?? panelFetch;
     this.clientName = opts.clientName ?? "Premiere panel";
   }
 
