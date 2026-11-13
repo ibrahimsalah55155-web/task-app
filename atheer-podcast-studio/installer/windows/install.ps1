@@ -201,13 +201,14 @@ function Stop-Engine {
   Start-Sleep -Milliseconds 500
 }
 
-function Engine-Answers($tokenFile) {
-  if (-not (Test-Path $tokenFile)) { return 0 }
-  $tok = (Get-Content $tokenFile -Raw).Trim()
+function Engine-Answers {
   foreach ($port in 47820..47823) {
     try {
-      $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri "http://127.0.0.1:$port/api/v1/capabilities" -Headers @{ Authorization = "Bearer $tok" }
-      if ($r.StatusCode -eq 200) { return $port }
+      $h = Invoke-RestMethod -TimeoutSec 2 -Uri "http://127.0.0.1:$port/api/v1/health"
+      if ($h.service -eq "atheer-companion") {
+        Invoke-RestMethod -TimeoutSec 5 -Uri "http://127.0.0.1:$port/api/v1/capabilities" | Out-Null  # accepted without a token
+        return $port
+      }
     } catch { }
   }
   return 0
@@ -216,8 +217,6 @@ function Engine-Answers($tokenFile) {
 function Setup-Autostart($pluginDir) {
   $vbs = Join-Path $pluginDir "engine\start-engine.vbs"
   if (-not (Test-Path $vbs)) { return "no-script" }
-  $probe = Join-Path $pluginDir "engine\.write-test"
-  try { Set-Content -Path $probe -Value "x" -ErrorAction Stop; Remove-Item $probe -Force } catch { return "read-only" }
   if (-not $NoAutostart) {
     $ws = New-Object -ComObject WScript.Shell
     $lnk = $ws.CreateShortcut($StartupLnk)
@@ -229,11 +228,10 @@ function Setup-Autostart($pluginDir) {
     $lnk.Save()
   }
   Start-Process -FilePath (Join-Path $env:WINDIR "System32\wscript.exe") -ArgumentList ('"' + $vbs + '"') -WindowStyle Hidden
-  $tokenFile = Join-Path $pluginDir "engine\autostart.token"
-  $deadline = (Get-Date).AddSeconds(90)  # first start: Windows Defender scans the new files
+  $deadline = (Get-Date).AddSeconds(150)  # first start: Windows Defender scans the new files
   while ((Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 2
-    $port = Engine-Answers $tokenFile
+    $port = Engine-Answers
     if ($port) { Say "Engine running on port $port" "Green"; return "running:$port" }
   }
   return "no-answer"
@@ -286,7 +284,7 @@ try {
     if ($engineState -like "running:*") {
       $msg += "`n`nالمحرك شغّال في الخلفية (من غير شباك) وهيشتغل لوحده كل ما تفتح الجهاز."
     } elseif ($engineState -eq "no-answer") {
-      $msg += "`n`nالمحرك لسه مردّش (ممكن الأنتي فايرس بيفحص الملفات). لو البانل قال إن المحرك مش شغال، اعمل Restart للجهاز."
+      $msg += "`n`nالمحرك لسه مردّش. شغّل Check-Engine.cmd من نفس الفولدر وابعت الملف اللي هيطلع على سطح المكتب."
     }
     if ($how -eq "direct") {
       $msg += "`n`nلو مظهرش في القايمة: البريمير ← Edit ← Preferences (أو Settings) ← Plugins ← فعّل Enable developer mode، واقفل البريمير وافتحه تاني."

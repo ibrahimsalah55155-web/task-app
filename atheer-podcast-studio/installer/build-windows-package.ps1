@@ -235,10 +235,19 @@ if (-not $SkipTests) {
     # The installer starts the engine through Windows (start-engine.vbs) and checks it answers with its token.
     if (-not ($InstallLines -match "Engine: running:478")) { throw "engine did not start through Windows in round $round" }
   }
-  $tokFile = Join-Path $Uxp ("Plugins\External\com.multimediaai.podcaststudio_$Version\engine\autostart.token")
-  $tok = (Get-Content $tokFile -Raw).Trim()
-  $caps = Invoke-RestMethod -Uri "http://127.0.0.1:47820/api/v1/capabilities" -Headers @{ Authorization = "Bearer $tok" }
-  Write-Host "engine started by Windows answers: $($caps.service) $($caps.version)"
+  $caps = Invoke-RestMethod -Uri "http://127.0.0.1:47820/api/v1/capabilities"
+  Write-Host "engine started by Windows answers (no token): $($caps.version)"
+  # A browser page must still be refused.
+  $refused = $false
+  try { Invoke-RestMethod -Uri "http://127.0.0.1:47820/api/v1/capabilities" -Headers @{ Origin = "https://example.com" } | Out-Null } catch { $refused = $true }
+  if (-not $refused) { throw "browser origin accepted" }
+  Write-Host "OK: browser origin refused"
+
+  Say "Testing Check-Engine (report)"
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Dl "check-engine.ps1") -Quiet -UxpRoot $Uxp -Out (Join-Path $Work "check.txt")
+  $chk = Get-Content (Join-Path $Work "check.txt") -Raw
+  if ($chk -notmatch "ANSWERS") { throw "check-engine did not see the running engine" }
+  Get-Content (Join-Path $Work "check.txt") -Tail 15 | Write-Host
   $j = Get-Content $Info -Raw | ConvertFrom-Json
   $ids = @($j.plugins | ForEach-Object { $_.pluginId })
   Write-Host "registered: $($ids -join ', ')"

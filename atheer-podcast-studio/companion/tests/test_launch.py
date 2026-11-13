@@ -131,3 +131,27 @@ def test_token_file_and_port_range_start_once(tmp_path):
         proc.terminate()
         proc.wait(timeout=10)
         blocker.close()
+
+
+def test_trust_local_engine_needs_no_token_but_still_refuses_browsers(tmp_path):
+    import urllib.error
+
+    env = {**os.environ, "MAG_ENGINE_HOME": str(tmp_path / "home")}
+    args = [sys.executable, "-m", "atheer_companion", "--port-range", "47931-47933", "--trust-local"]
+    proc = subprocess.Popen(args, cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    try:
+        _wait_health(47931, timeout=20)
+        assert _get(47931, "/api/v1/capabilities")[0] == 200  # no token at all
+        assert _get(47931, "/api/v1/capabilities", "anything-at-all-123")[0] == 200
+        req = urllib.request.Request("http://127.0.0.1:47931/api/v1/capabilities", headers={"Origin": "https://evil.example"})
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        try:
+            opener.open(req, timeout=2)
+            raise AssertionError("browser origin accepted")
+        except urllib.error.HTTPError as e:
+            assert e.code == 403
+        again = subprocess.run(args, cwd=ROOT, env=env, capture_output=True, text=True, timeout=30)
+        assert again.returncode == 0  # already running
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)

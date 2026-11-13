@@ -17,6 +17,11 @@
    البريمير ← Edit ← Preferences (أو Settings) ← Plugins ← فعّل «Enable developer mode»
    واقفل البريمير وافتحه تاني.
 
+لو البانل قال إن المحرك (Engine) مش شغال:
+   دبل كليك على Check-Engine.cmd
+   هيعمل فحص ويشغّل المحرك، ويحفظ ملف MAG-engine-check.txt على سطح المكتب.
+   ابعت الملف ده (أو انسخ اللي فيه) في الشات.
+
 لشيل البلجن: دبل كليك على Uninstall.cmd
 
 ملاحظات:

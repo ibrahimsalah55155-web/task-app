@@ -42,8 +42,12 @@ class PairingError(Exception):
 
 
 class Auth:
-    def __init__(self, store: Store, pairing_code: str | None = None, session_token: str | None = None) -> None:
+    def __init__(self, store: Store, pairing_code: str | None = None, session_token: str | None = None,
+                 trust_local: bool = False) -> None:
         self._store = store
+        # Engine started by Windows for the panel: any local, non-browser client is accepted (browsers are
+        # still refused by the Origin/Host guard in app.py; the server listens on 127.0.0.1 only).
+        self.trust_local = trust_local
         # Token handed over by the plugin that launched this engine (never stored on disk).
         self._session_token = session_token if session_token and len(session_token) >= 16 else None
         self._lock = threading.Lock()
@@ -76,6 +80,8 @@ class Auth:
         return token
 
     def check(self, token: str | None) -> bool:
+        if self.trust_local:
+            return True
         if not token:
             return False
         if self._session_token and hmac.compare_digest(token, self._session_token):

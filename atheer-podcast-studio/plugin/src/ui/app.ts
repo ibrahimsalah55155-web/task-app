@@ -10,7 +10,7 @@
  */
 import { CompanionClient, CompanionError, type Capabilities, type Health, type Job, type ProbeResult,
   type TokenStore } from "../companion/client.ts";
-import { type PluginFiles, canAutostart, connectAutostart, uxpPluginFiles } from "../companion/autostart.ts";
+import { type PluginFiles, canAutostart, connectAutostart, portReport, tryPorts, uxpPluginFiles } from "../companion/autostart.ts";
 import { type EngineAddon, loadAddonAsync, startBuiltInEngine } from "../companion/engine.ts";
 import { errorMessage, formatEntry, getEntries, logger, onLog, setLogLevel } from "../core/log.ts";
 import { type Prefs, loadPrefs, savePrefs } from "../core/prefs.ts";
@@ -380,7 +380,23 @@ export class PanelApp {
   async checkEngine(quiet = false): Promise<void> {
     const e = this.state.engine;
     if (e.mode === "builtin" || e.mode === "autostart") {
-      if (e.status !== "running") return;
+      if (e.status !== "running") {
+        // Engine started by Windows may come up later (first start, antivirus scan, log-on): keep looking.
+        if (e.mode === "autostart" && e.status !== "starting" && this.files) {
+          const tok = (await this.files.read(["engine", "autostart.token"]))?.trim() ?? "";
+          const found = await tryPorts(tok);
+          if (found) {
+            this.client = found.client;
+            try {
+              this.setEngine({ status: "running", health: await this.client.health(), caps: await this.client.capabilities(), error: null });
+              log.info(`Engine (started by Windows) is now answering on port ${found.port}`);
+            } catch (err) {
+              log.debug(`engine found but not ready: ${errorMessage(err)}`);
+            }
+          }
+        }
+        return;
+      }
       try {
         this.setEngine({ health: await this.client.health() }, false);
       } catch (err) {
@@ -477,6 +493,7 @@ export class PanelApp {
       `Engine: ${s.engine.status} ${s.engine.health?.version ?? ""} ${s.engine.error ?? ""}`,
       `Engine addon: ${this.addon ? this.safeAddonInfo() : `not used${this.addonProblem ? ` (${this.addonProblem})` : ""}`}`,
       `Origins seen by engine: ${(s.engine.caps?.seenOrigins ?? []).join(", ") || "n/a"}`,
+      `Engine ports: ${portReport()}`,
       "Capabilities:",
       ...s.caps.map((c) => `  ${c.status.padEnd(24)} ${c.minVersion.padEnd(5)} ${c.label}`),
       `Project: ${s.project?.name ?? "none"} | sequence: ${s.project?.activeSequence?.name ?? "none"}`,

@@ -3,9 +3,10 @@
  *
  * Used when Premiere does not run the plugin's native launcher (for example a plugin
  * installed without Creative Cloud). The package carries engine/start-engine.vbs, which
- * starts the bundled engine hidden on ports 47820-47823 with a token kept in
- * engine/autostart.token (created by the engine on first start). The installer runs it
- * at logon and right after installing; the panel can also ask Windows to run it.
+ * starts the bundled engine hidden on ports 47820-47823 in "trust local" mode: no token,
+ * only local non-browser clients (browsers are refused by the engine's Origin/Host guard).
+ * The installer runs it at logon and right after installing; the panel can also ask
+ * Windows to run it. (Older packages used a token file; it is still honoured if present.)
  */
 import { errorMessage, logger } from "../core/log.ts";
 import { CompanionClient, type FetchFn, MemoryTokenStore } from "./client.ts";
@@ -72,33 +73,41 @@ export async function canAutostart(files: PluginFiles): Promise<boolean> {
   return (await files.path(SCRIPT)) !== null;
 }
 
-async function tryPorts(token: string, fetchFn?: FetchFn): Promise<StartedEngine | null> {
+/** Last thing each port said, for the error message and diagnostics. */
+export const lastPortErrors: Record<number, string> = {};
+
+const LOCAL_TOKEN = "trust-local-engine-started-by-windows";
+
+export async function tryPorts(token: string, fetchFn?: FetchFn): Promise<StartedEngine | null> {
   for (const port of ENGINE_PORTS) {
     const tokens = new MemoryTokenStore();
-    await tokens.set(token);
+    await tokens.set(token || LOCAL_TOKEN);
     const client = new CompanionClient({ baseUrl: `http://127.0.0.1:${port}`, tokens, fetchFn });
     try {
       await client.health();
-      await client.capabilities(); // proves this engine is ours (accepts our token)
+      await client.capabilities(); // proves this engine accepts us
+      delete lastPortErrors[port];
       return { port, pid: 0, client };
-    } catch {
-      /* not here */
+    } catch (e) {
+      lastPortErrors[port] = errorMessage(e);
     }
   }
   return null;
 }
 
+export function portReport(): string {
+  return ENGINE_PORTS.map((p) => `${p}: ${lastPortErrors[p] ?? "ok"}`).join(" | ");
+}
+
 export async function connectAutostart(files: PluginFiles, opts: { launch?: boolean; timeoutMs?: number; pollMs?: number;
   fetchFn?: FetchFn; onStep?: (m: string) => void } = {}): Promise<StartedEngine> {
-  const timeoutMs = opts.timeoutMs ?? 60000;
+  const timeoutMs = opts.timeoutMs ?? 180000; // first start after install: antivirus scans ~400 MB
   const pollMs = opts.pollMs ?? 700;
   let token = (await files.read(TOKEN))?.trim() ?? "";
-  if (token) {
-    const found = await tryPorts(token, opts.fetchFn);
-    if (found) {
-      log.info(`Engine (started by Windows) found on port ${found.port}`);
-      return found;
-    }
+  const first = await tryPorts(token, opts.fetchFn);
+  if (first) {
+    log.info(`Engine (started by Windows) found on port ${first.port}`);
+    return first;
   }
   if (opts.launch === false) throw new Error("The engine is not running.");
   const script = await files.path(SCRIPT);
@@ -110,7 +119,6 @@ export async function connectAutostart(files: PluginFiles, opts: { launch?: bool
   while (Date.now() < deadline) {
     await sleep(pollMs);
     token = (await files.read(TOKEN))?.trim() ?? token;
-    if (!token) continue;
     const found = await tryPorts(token, opts.fetchFn);
     if (found) {
       log.info(`Engine started through Windows on port ${found.port}`);
@@ -119,5 +127,5 @@ export async function connectAutostart(files: PluginFiles, opts: { launch?: bool
   }
   throw new Error(err
     ? `Premiere did not allow the panel to start the engine (${err}). Run "Start engine" from the install folder, or restart Windows.`
-    : `The engine did not answer within ${Math.round(timeoutMs / 1000)} s.`);
+    : `The engine did not answer within ${Math.round(timeoutMs / 1000)} s (${portReport()}). Run "Check-Engine.cmd" from the install folder and send its result.`);
 }

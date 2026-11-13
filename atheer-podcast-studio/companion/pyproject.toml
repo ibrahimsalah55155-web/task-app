@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "atheer-companion"
-version = "0.4.1"
+version = "0.4.2"
 description = "Local processing service for the ATHEER PODCAST STUDIO Premiere Pro panel"
 requires-python = ">=3.10"
 license = { text = "Proprietary" }
@@ -35,7 +35,7 @@ ai = []
 dev = ["pytest>=8", "httpx>=0.27"]
 
 [project.scripts]
-atheer-companion = "atheer_companion.__main__:main"
+atheer-companion = "atheer_companion.__main__:run"
 
 [tool.setuptools.packages.find]
 include = ["atheer_companion*"]

@@ -122,6 +122,19 @@ def _engine_with_token(host: str, port: int, token: str) -> bool:
         return False
 
 
+def _engine_answers(host: str, port: int) -> bool:
+    import http.client
+    import json
+
+    try:
+        c = http.client.HTTPConnection(host, port, timeout=1.5)
+        c.request("GET", "/api/v1/health", headers={"Host": f"{host}:{port}"})
+        r = c.getresponse()
+        return r.status == 200 and json.loads(r.read() or b"{}").get("service") == "atheer-companion"
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _parse_range(text: str) -> list[int]:
     a, _, b = text.partition("-")
     lo, hi = int(a), int(b or a)
@@ -144,6 +157,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--token-file", type=Path, default=None,
                    help="file holding the session token (created if missing); used when the engine starts with "
                         "Windows instead of from the plugin")
+    p.add_argument("--trust-local", action="store_true",
+                   help="no token or pairing: accept local non-browser clients (engine started by Windows)")
     p.add_argument("--port-range", default=None,
                    help="e.g. 47820-47823: use the first free port; exit quietly if an engine with the same token "
                         "already runs in the range")
@@ -167,11 +182,11 @@ def main(argv: list[str] | None = None) -> int:
     file_token = _token_from_file(args.token_file) if args.token_file else None
     if args.port_range:
         ports = _parse_range(args.port_range)
-        if file_token:
-            for port in ports:
-                if _engine_with_token(config.host, port, file_token):
-                    log.info("An engine for this token already runs on port %s; nothing to do.", port)
-                    return 0
+        for port in ports:
+            if (args.trust_local and _engine_answers(config.host, port)) or \
+                    (file_token and _engine_with_token(config.host, port, file_token)):
+                log.info("An engine already runs on port %s; nothing to do.", port)
+                return 0
         free = [port for port in ports if _port_free(config.host, port)]
         if not free:
             log.error("No free port in %s.", args.port_range)
@@ -192,14 +207,14 @@ def main(argv: list[str] | None = None) -> int:
         return 3
     if args.parent_pid:
         watch_parent(args.parent_pid)
-    auth = Auth(store, session_token=session_token)
+    auth = Auth(store, session_token=session_token, trust_local=args.trust_local)
     app = create_app(config, store=store, auth=auth)
     tools = app.state.tools
     bar = "=" * 60
     print(bar)
     print(f" Multimedia & AI Group engine {__version__}  ->  http://{config.host}:{config.port}")
-    if session_token:
-        print(" Started by the Premiere plugin (no pairing needed).")
+    if session_token or args.trust_local:
+        print(" Started for the Premiere plugin (no pairing needed).")
     else:
         print(f" Pairing code:  {auth.pairing_code[:3]} {auth.pairing_code[3:]}")
         print(" Enter this code in the Premiere panel (Dashboard > Engine) once.")
@@ -217,5 +232,27 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def run() -> int:
+    """main() with a last-resort crash log: under pythonw.exe nobody would ever see the traceback."""
+    try:
+        return main()
+    except SystemExit:
+        raise
+    except BaseException:
+        import traceback
+
+        text = traceback.format_exc()
+        try:
+            d = default_data_dir() / "logs"
+            d.mkdir(parents=True, exist_ok=True)
+            with open(d / "crash.log", "a", encoding="utf-8") as f:
+                f.write(f"\n--- {time.strftime('%Y-%m-%d %H:%M:%S')} engine {__version__} args={sys.argv[1:]}\n{text}")
+        except OSError:
+            pass
+        if sys.stderr is not None:
+            sys.stderr.write(text)
+        return 1
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run())

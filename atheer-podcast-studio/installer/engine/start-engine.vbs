@@ -12,8 +12,7 @@ On Error Resume Next
 sh.Environment("PROCESS").Remove "PYTHONHOME"
 sh.Environment("PROCESS").Remove "PYTHONPATH"
 On Error GoTo 0
-cmd = q & d & "\python\pythonw.exe" & q & " -m atheer_companion --port-range 47820-47823" & _
-      " --token-file " & q & d & "\autostart.token" & q & _
+cmd = q & d & "\python\pythonw.exe" & q & " -m atheer_companion --port-range 47820-47823 --trust-local" & _
       " --ffmpeg " & q & d & "\ffmpeg\ffmpeg.exe" & q & _
       " --ffprobe " & q & d & "\ffmpeg\ffprobe.exe" & q
 sh.CurrentDirectory = d
