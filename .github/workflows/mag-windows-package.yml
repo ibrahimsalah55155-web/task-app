@@ -11,7 +11,38 @@ permissions:
   contents: read
 
 jobs:
+  models:
+    # Offline models shipped inside the .ccx: speaker separation + Arabic<->English translation.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: build-models
+          key: mag-models-${{ hashFiles('atheer-podcast-studio/installer/fetch_models.py') }}
+      - uses: actions/setup-python@v5
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          python-version: '3.12'
+      - name: Fetch and convert models
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python -m pip install -q --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install -q ctranslate2 "transformers<5" sentencepiece sacremoses
+          python atheer-podcast-studio/installer/fetch_models.py --out build-models
+      - run: du -sh build-models/* && find build-models -type f | sort
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mag-models
+          path: build-models
+          if-no-files-found: error
+          retention-days: 7
+
   checks:
+    needs: models
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -36,14 +67,25 @@ jobs:
           curl -sSL -o /tmp/ar.onnx https://raw.githubusercontent.com/dibbed/TTSKit-multi-engine-tts/main/models/piper/ar_JO-kareem-medium.onnx
           curl -sSL -o /tmp/ar.onnx.json https://raw.githubusercontent.com/dibbed/TTSKit-multi-engine-tts/main/models/piper/ar_JO-kareem-medium.onnx.json
           cd companion && RUN_REAL_ASR=1 PIPER_VOICE=/tmp/ar.onnx ASR_MODEL=small python -m pytest -q -s tests/test_asr_real.py
+      - uses: actions/download-artifact@v4
+        with:
+          name: mag-models
+          path: /tmp/mag-models
+      - name: Real speaker separation + translation tests (bundled models)
+        run: |
+          cd companion && RUN_REAL_MODELS=1 MAG_MODELS_DIR=/tmp/mag-models PIPER_VOICE=/tmp/ar.onnx python -m pytest -q -s tests/test_models_real.py
       - name: Panel checks (types, Adobe lint rules, tests, build)
         run: cd plugin && npm ci && npm run check
 
   windows-package:
-    needs: checks
+    needs: [models, checks]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: mag-models
+          path: atheer-podcast-studio/build-models
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -54,7 +96,7 @@ jobs:
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ./atheer-podcast-studio/installer/build-windows-package.ps1 -OutDir build-win
+        run: ./atheer-podcast-studio/installer/build-windows-package.ps1 -OutDir build-win -ModelsDir build-models
       - uses: actions/upload-artifact@v4
         with:
           name: MultimediaAIGroup-windows-ccx

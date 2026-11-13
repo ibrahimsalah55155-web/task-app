@@ -5,7 +5,7 @@ This service does that work on the same machine and talks to the panel over
 127.0.0.1 only.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 # Bumped whenever a request/response shape changes incompatibly.
 # The panel refuses to talk to a companion with a different API major version.

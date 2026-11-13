@@ -7,3 +7,4 @@ __pycache__/
 companion/bin/
 companion/*.egg-info/
 .venv/
+build-models/

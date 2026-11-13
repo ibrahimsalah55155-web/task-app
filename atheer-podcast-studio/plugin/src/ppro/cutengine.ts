@@ -12,7 +12,8 @@
  *      the new sequence back and comparing it with the plan.
  *
  * Every Premiere change follows the lockedAccess/executeTransaction pattern and
- * shows up as named Undo steps. The source sequence is only read.
+ * shows up as named Undo steps. By default the source sequence is only read;
+ * with `inPlace` the clone is kept as a backup and the source itself is rebuilt.
  */
 import type {
   AudioClipTrackItem, ClipProjectItem, FolderItem, Project, ProjectItem, Sequence, VideoClipTrackItem,
@@ -41,11 +42,18 @@ export interface CutRequest {
   /** Override the enabled state per piece (Auto Director). null keeps the source state. */
   disable?: (p: Piece) => boolean | null;
   newName: string;
+  /**
+   * Edit the source sequence itself. A full copy is kept first, named newName
+   * ("..._BACKUP_..."), so the original edit is always one click away.
+   */
+  inPlace?: boolean;
   onProgress?: (step: string, fraction: number) => void;
 }
 
 export interface CutReport {
   newSequenceName: string;
+  /** In-place edits: the untouched copy of the sequence as it was before. */
+  backupName?: string;
   plan: CutPlan;
   subclips: number;
   placed: number;
@@ -151,6 +159,9 @@ export async function buildCutSequence(project: Project, source: Sequence, req: 
   const sequenceEnd = parseTicks((await source.getEndTime()).ticks);
   const live = await readLiveItems(source);
   if (live.length === 0) throw new Error("The sequence has no clips to cut.");
+  if (req.inPlace && (await readAllItems(source)).length !== live.length) {
+    throw new Error("This sequence contains nested sequences, which the cut engine does not rebuild. Use \"new sequence\" mode.");
+  }
   const plan = planCuts(live.map((l) => l.src), { tpf, sequenceEnd, remove: req.remove, splitAt: req.splitAt });
   if (plan.skipped.length) {
     throw new Error(`Cannot cut ${plan.skipped.length} clip(s): ${plan.skipped[0]!.reason}. Remove speed changes first.`);
@@ -239,8 +250,11 @@ export async function buildCutSequence(project: Project, source: Sequence, req: 
   });
   finishTransaction(committed, undo, 1);
   undoSteps++;
-  const target = (await project.getSequences()).find((s) => !before.has(s.guid.toString()));
-  if (!target) throw new Error("The sequence copy was not found after cloning.");
+  const clone = (await project.getSequences()).find((s) => !before.has(s.guid.toString()));
+  if (!clone) throw new Error("The sequence copy was not found after cloning.");
+  // In place: the clone is the backup and the original is rebuilt. Otherwise the clone is the result.
+  const target = req.inPlace ? source : clone;
+  const sourceName = (await source.getProjectItem()).name;
 
   const editor = P.SequenceEditor.getEditor(target);
   const allTargetItems = await readAllItems(target);
@@ -304,7 +318,7 @@ export async function buildCutSequence(project: Project, source: Sequence, req: 
     undoSteps++;
   }
 
-  const seqItem = await target.getProjectItem();
+  const seqItem = await clone.getProjectItem();
   const sequencesBin = await findChildBin(appBin, "03 Sequences");
   committed = false;
   project.lockedAccess(() => {
@@ -341,7 +355,8 @@ export async function buildCutSequence(project: Project, source: Sequence, req: 
   }
   progress("done", 1);
   const report: CutReport = {
-    newSequenceName: req.newName,
+    newSequenceName: req.inPlace ? sourceName : req.newName,
+    backupName: req.inPlace ? req.newName : undefined,
     plan,
     subclips: segments.length,
     placed: placed.length,

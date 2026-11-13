@@ -1,4 +1,5 @@
-"""API for phases 2-6: sync, silence, director, transcription, captions, reels, faces."""
+"""API for phases 2-6 and the finishing tools: sync, silence, director, transcription, captions, reels,
+faces, voice clean-up, colour match, speaker separation, translation."""
 
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from .analysis.audio import AudioCache
+from .analysis import cleanup, color, diarize, translate
 from .analysis.captions import STYLES, build_captions, render_caption_stills, to_srt
 from .analysis.faces import face_centres
 from .analysis.reels import find_reels
@@ -54,9 +56,18 @@ class SilenceBody(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
+class Diarization(BaseModel):
+    segments: list[dict[str, Any]]
+    roles: dict[str, str]  # speaker number (as text) -> "guest" | "host"
+
+    def role_map(self) -> dict[int, str]:
+        return {int(k): v for k, v in self.roles.items() if v in ("guest", "host")}
+
+
 class DirectorBody(BaseModel):
-    guest: TrackIn
-    host: TrackIn
+    guest: TrackIn | None = None
+    host: TrackIn | None = None
+    diarization: Diarization | None = None  # one shared mic: who speaks comes from speaker separation
     duration: float = Field(gt=0)
     params: dict[str, Any] = Field(default_factory=dict)
 
@@ -66,6 +77,48 @@ class TranscribeBody(BaseModel):
     duration: float = Field(gt=0)
     model: str = "large-v3-turbo"
     language: str | None = "ar"
+    glossary: list[str] = Field(default_factory=list, max_length=200)
+    replacements: list[tuple[str, str]] = Field(default_factory=list, max_length=2000)
+    diarization: Diarization | None = None
+
+
+class CleanupBody(BaseModel):
+    files: list[str] = Field(min_length=1, max_length=16)
+    preset: str = "standard"
+    target: str = "podcast"
+    overrides: dict[str, Any] = Field(default_factory=dict)
+    outDir: str
+
+
+class ColorCamIn(BaseModel):
+    id: str
+    path: str
+    times: list[float] = Field(min_length=1, max_length=24)
+
+
+class ColorMeasureBody(BaseModel):
+    cameras: list[ColorCamIn] = Field(min_length=1, max_length=8)
+    reference: str
+    lutDir: str | None = None
+    strength: float = Field(default=1.0, ge=0, le=1)
+
+
+class ColorCompareBody(BaseModel):
+    path: str
+    target: dict[str, Any]
+    crop: tuple[float, float, float, float] | None = None
+
+
+class DiarizeBody(BaseModel):
+    track: TrackIn
+    duration: float = Field(gt=0)
+    speakers: int = Field(default=2, ge=0, le=6)  # 0 = find out
+
+
+class TranslateBody(BaseModel):
+    captions: list[dict[str, Any]]
+    source: str = "ar"
+    target: str = "en"
 
 
 class CaptionBuildBody(BaseModel):
@@ -109,6 +162,9 @@ def register(app: FastAPI, jobs: JobManager, store: Store, data_dir: Path, ffmpe
     cache = AudioCache(ffmpeg_get(), data_dir / "cache" / "audio")
     models_dir = data_dir / "models" / "whisper"
     transcripts = data_dir / "cache" / "transcripts"
+    from .analysis import modelpaths
+
+    modelpaths.add_root(data_dir / "models")
 
     # ---- jobs -------------------------------------------------------------------
 
@@ -139,24 +195,69 @@ def register(app: FastAPI, jobs: JobManager, store: Store, data_dir: Path, ffmpe
 
     def director_job(ctx, p):
         body = DirectorBody(**p)
-        sig = analyse_tracks(cache, _tracks([body.guest, body.host]), body.duration,
-                             lambda x, m: ctx.progress(x * 0.9, m), ctx.cancel_event)
+        if body.diarization is not None:
+            signals = diarize.signals_from_segments(body.diarization.segments, body.diarization.role_map(),
+                                                    body.duration)
+        else:
+            if body.guest is None or body.host is None:
+                raise ValueError("Choose the guest and host microphones, or separate speakers from one mic.")
+            sig = analyse_tracks(cache, _tracks([body.guest, body.host]), body.duration,
+                                 lambda x, m: ctx.progress(x * 0.9, m), ctx.cancel_event)
+            signals = {"guest": sig[0], "host": sig[1]}
         ctx.progress(0.92, "Choosing cameras")
-        return direct({"guest": sig[0], "host": sig[1]}, body.params)
+        return direct(signals, body.params)
 
     def transcribe_job(ctx, p):
         body = TranscribeBody(**p)
         tracks = _tracks(body.tracks)
-        key = audio_key(tracks, body.model, body.language)
+        key = audio_key(tracks, body.model, body.language, body.glossary)
         signals = None
         roles = [t["role"] for t in tracks]
-        if "guest" in roles and "host" in roles:
+        if body.diarization is None and "guest" in roles and "host" in roles:
             sig = analyse_tracks(cache, tracks, body.duration, lambda x, m: ctx.progress(0.02, "Preparing"),
                                  ctx.cancel_event)
             signals = {t["role"]: s for t, s in zip(tracks, sig) if t["role"] in ("guest", "host")}
-        return transcribe_tracks(cache, tracks, body.duration, WhisperBackend(body.model, models_dir), body.language,
-                                 transcripts, key, signals, progress=lambda x, m: ctx.progress(x, m),
-                                 cancel=ctx.cancel_event)
+        res = transcribe_tracks(cache, tracks, body.duration, WhisperBackend(body.model, models_dir, body.glossary),
+                                body.language, transcripts, key, signals, body.replacements,
+                                progress=lambda x, m: ctx.progress(x, m), cancel=ctx.cancel_event)
+        if body.diarization is not None:
+            diarize.label_words([w for s in res["segments"] for w in s["words"]], body.diarization.segments,
+                                body.diarization.role_map())
+        return res
+
+    def cleanup_job(ctx, p):
+        body = CleanupBody(**p)
+        s = cleanup.settings(body.preset, {**body.overrides,
+                                           "lufs": cleanup.LOUDNESS_TARGETS.get(body.target, -16.0)})
+        out = []
+        n = len(body.files)
+        for i, f in enumerate(dict.fromkeys(body.files)):
+            dst = cleanup.output_path(body.outDir, f, body.preset)
+            out.append(cleanup.clean_file(ffmpeg_get(), ffprobe_get(), f, dst, s,
+                                          progress=lambda x, m, i=i: ctx.progress((i + x) / n, m),
+                                          cancel=ctx.cancel_event))
+        return {"files": out}
+
+    def color_job(ctx, p):
+        body = ColorMeasureBody(**p)
+        res = color.measure(ffmpeg_get(), [c.model_dump() for c in body.cameras], body.reference,
+                            progress=lambda x, m: ctx.progress(x * 0.9, m), cancel=ctx.cancel_event)
+        if body.lutDir:
+            ctx.progress(0.92, "Writing LUTs")
+            res["luts"] = color.write_luts(res, body.lutDir, body.strength)
+        return res
+
+    def diarize_job(ctx, p):
+        body = DiarizeBody(**p)
+        return diarize.diarize_track(cache, _tracks([body.track])[0], body.duration, body.speakers,
+                                     progress=lambda x, m: ctx.progress(x, m), cancel=ctx.cancel_event)
+
+    def translate_job(ctx, p):
+        body = TranslateBody(**p)
+        return {"captions": translate.translate_captions(body.captions, body.source, body.target,
+                                                         progress=lambda x, m: ctx.progress(x, m),
+                                                         cancel=ctx.cancel_event),
+                "source": body.source, "target": body.target}
 
     def captions_job(ctx, p):
         body = CaptionRenderBody(**p)
@@ -169,7 +270,9 @@ def register(app: FastAPI, jobs: JobManager, store: Store, data_dir: Path, ffmpe
         return {"faces": face_centres(ffmpeg_get(), body.path, [tuple(r) for r in body.ranges], cancel=ctx.cancel_event)}
 
     for kind, fn in (("sync", sync_job), ("silence", silence_job), ("director", director_job),
-                     ("transcribe", transcribe_job), ("render_captions", captions_job), ("faces", faces_job)):
+                     ("transcribe", transcribe_job), ("render_captions", captions_job), ("faces", faces_job),
+                     ("cleanup", cleanup_job), ("color", color_job), ("diarize", diarize_job),
+                     ("translate", translate_job)):
         jobs.register(kind, fn)
 
     def submit(kind: str, model: type[BaseModel]):
@@ -187,6 +290,10 @@ def register(app: FastAPI, jobs: JobManager, store: Store, data_dir: Path, ffmpe
     app.post(PREFIX + "/jobs/transcribe", dependencies=authed, status_code=202)(submit("transcribe", TranscribeBody))
     app.post(PREFIX + "/jobs/render_captions", dependencies=authed, status_code=202)(submit("render_captions", CaptionRenderBody))
     app.post(PREFIX + "/jobs/faces", dependencies=authed, status_code=202)(submit("faces", FacesBody))
+    app.post(PREFIX + "/jobs/cleanup", dependencies=authed, status_code=202)(submit("cleanup", CleanupBody))
+    app.post(PREFIX + "/jobs/color", dependencies=authed, status_code=202)(submit("color", ColorMeasureBody))
+    app.post(PREFIX + "/jobs/diarize", dependencies=authed, status_code=202)(submit("diarize", DiarizeBody))
+    app.post(PREFIX + "/jobs/translate", dependencies=authed, status_code=202)(submit("translate", TranslateBody))
 
     # ---- quick (synchronous) helpers ---------------------------------------------------
 
@@ -194,7 +301,16 @@ def register(app: FastAPI, jobs: JobManager, store: Store, data_dir: Path, ffmpe
     async def info() -> dict[str, Any]:
         downloaded = sorted(p.name for p in models_dir.glob("models--*")) if models_dir.is_dir() else []
         return {"silencePresets": PRESETS, "silero": silero_available(), "asrModels": MODELS,
-                "asrDownloaded": downloaded, "captionStyles": STYLES}
+                "asrDownloaded": downloaded, "captionStyles": STYLES,
+                "cleanupPresets": cleanup.PRESETS, "loudnessTargets": cleanup.LOUDNESS_TARGETS,
+                "diarization": diarize.available(), "translation": translate.available_pairs()}
+
+    @app.post(PREFIX + "/color/compare", dependencies=authed)
+    async def color_compare(body: ColorCompareBody) -> dict[str, Any]:
+        try:
+            return await asyncio.to_thread(color.compare_image, body.path, body.target, body.crop)
+        except color.ColorError as e:
+            raise HTTPException(400, detail={"code": "bad_request", "message": str(e)}) from e
 
     @app.post(PREFIX + "/captions/build", dependencies=authed)
     async def captions_build(body: CaptionBuildBody) -> dict[str, Any]:

@@ -5,6 +5,7 @@
 #   win\x64\mag_engine.uxpaddon               native launcher (UXP Hybrid addon, MSVC Release, static CRT)
 #   engine\python\                            official signed CPython (embeddable) + engine code + deps
 #   engine\ffmpeg\ffmpeg.exe, ffprobe.exe     FFmpeg (LGPL build)
+#   engine\models\                            speaker separation + translation models (installer/fetch_models.py)
 #
 # Requirements on the build machine: Windows x64, Visual Studio 2022 (C++ workload),
 # Node.js 20+, Python 3.12, git, internet. Used as-is by .github/workflows/mag-windows-package.yml.
@@ -14,6 +15,7 @@ param(
   [string]$OutDir = "build-win",
   [string]$SdkDir = "",
   [string]$PythonVersion = "3.12.10",
+  [string]$ModelsDir = "",
   [switch]$SkipTests
 )
 $ErrorActionPreference = "Stop"
@@ -109,6 +111,17 @@ $Bin = Get-ChildItem -Recurse (Join-Path $Work "ffmpeg") -Filter "ffprobe.exe" |
 Copy-Item (Join-Path $Bin.DirectoryName "ffmpeg.exe"), (Join-Path $Bin.DirectoryName "ffprobe.exe") $FfDir
 Get-ChildItem -Recurse (Join-Path $Work "ffmpeg") -Filter "LICENSE*" | Select-Object -First 1 | Copy-Item -Destination (Join-Path $FfDir "LICENSE.txt")
 
+# ---- 4b. offline models -------------------------------------------------------------------
+if ($ModelsDir) {
+  $Src = if ([System.IO.Path]::IsPathRooted($ModelsDir)) { $ModelsDir } else { Join-Path $Repo $ModelsDir }
+  if (-not (Test-Path (Join-Path $Src "diarization\embedding.onnx"))) { throw "Models folder $Src is incomplete" }
+  Say "Adding offline models from $Src"
+  New-Item -ItemType Directory -Force -Path (Join-Path $Pkg "engine\models") | Out-Null
+  Copy-Item -Recurse (Join-Path $Src "*") (Join-Path $Pkg "engine\models")
+} else {
+  Write-Warning "No -ModelsDir: speaker separation and translation will be unavailable in this package."
+}
+
 # ---- 5. tests on this Windows machine ------------------------------------------------
 if (-not $SkipTests) {
   Say "Testing the packaged engine"
@@ -139,6 +152,32 @@ print('offset', off, 'silero', silero_available())
 assert abs(off - 2.5) < 0.01 and silero_available()
 "@
   & (Join-Path $Py "python.exe") -c $SyncTest; Must "sync test"
+
+  Say "Testing voice clean-up (RNNoise + loudness) keeps sample-exact timing on Windows"
+  & $FfDir\ffmpeg.exe -hide_banner -loglevel error -y -f lavfi -i "sine=f=180:d=6:r=48000" -f lavfi -i "anoisesrc=d=6:c=pink:r=48000:a=0.05" -filter_complex "[0][1]amix=inputs=2:normalize=0" (Join-Path $Work "mic.wav")
+  $CleanTest = @"
+from atheer_companion.analysis import cleanup
+r = cleanup.clean_file(r'$FfDir\ffmpeg.exe', r'$FfDir\ffprobe.exe', r'$Work\mic.wav', r'$Work\clean\mic_clean.wav', cleanup.settings('standard'))
+print('lufs', r['lufsBefore'], '->', r['lufsAfter'], 'lag ms', r['lagMs'])
+assert abs(r['lagMs']) < 1 and abs(r['lufsAfter'] + 16) < 1
+"@
+  & (Join-Path $Py "python.exe") -c $CleanTest; Must "clean-up test"
+
+  if ($ModelsDir) {
+    Say "Testing translation (CTranslate2 + SentencePiece) and speaker models (sherpa-onnx) with the packaged Python"
+    $ModelTest = @"
+import numpy as np
+from atheer_companion.analysis import translate, diarize
+print(translate.available_pairs())
+out = translate.OpusMT('ar', 'en')(['شكراً جزيلاً على وجودك معنا اليوم.'])
+print(out)
+assert 'thank' in out[0].lower()
+assert diarize.available()
+segs = diarize.diarize_audio(np.zeros(16000 * 3, np.float32), 2)
+print('diarization ok', segs)
+"@
+    & (Join-Path $Py "python.exe") -c $ModelTest; Must "model test"
+  }
 
   Say "Testing the addon: start, health, stop"
   & (Join-Path $Work "test_harness.exe") (Join-Path $AddonDir "mag_engine.uxpaddon") 47830 stop; Must "addon stop test"

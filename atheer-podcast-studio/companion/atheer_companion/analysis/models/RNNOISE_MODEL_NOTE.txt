@@ -1,0 +1,3 @@
+rnnoise_voice.rnnn is "beguiling-drafter" (voice = speech + laughter, recording noise)
+from https://github.com/GregorR/rnnoise-models . Its README states the models are not
+creative work and not subject to copyright. Used with FFmpeg's arnndn filter.

@@ -118,3 +118,19 @@ test("speed-changed clips stop the run before anything is changed", async () => 
   await assert.rejects(buildCutSequence(project as never, source as never, { remove: [{ start: 0n, end: BigInt(sec(1)) }], newName: "S" }), /speed/);
   assert.equal(project.undoStack.length, 0);
 });
+
+test("in place: the original sequence is rebuilt and an untouched backup is kept", async () => {
+  const original = snapshot(source);
+  const r = await buildCutSequence(project as never, source as never, {
+    remove: [{ start: BigInt(sec(20)), end: BigInt(sec(25)) }], newName: "PODCAST_01_BACKUP_TEST", inPlace: true,
+  });
+  assert.deepEqual(r.mismatches, []);
+  assert.equal(r.verified, 10);
+  assert.equal(r.newSequenceName, "PODCAST_01");
+  assert.equal(r.backupName, "PODCAST_01_BACKUP_TEST");
+  const backup = project.sequences.find((s) => s !== source)!;
+  assert.equal(snapshot(backup), original, "backup holds the edit as it was");
+  assert.notEqual(snapshot(source), original, "original was rebuilt");
+  assert.equal(source.video[0]!.items.length, 2);
+  assert.equal(Number(source.video[0]!.items[1]!.start), sec(20));
+});
