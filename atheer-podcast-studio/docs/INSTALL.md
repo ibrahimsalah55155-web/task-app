@@ -20,15 +20,22 @@ speaker separation and voice clean-up need no download.
 
 ## Install
 
-1. Download the `.ccx`: GitHub → **Actions** → *Multimedia & AI Group plugin (Windows .ccx)* →
-   latest green run → **Artifacts** → `MultimediaAIGroup-windows-ccx` (unzip it to get the `.ccx`).
+1. Download: GitHub → **Actions** → *Multimedia & AI Group plugin (Windows .ccx)* → latest green run →
+   **Artifacts** → `MultimediaAIGroup-windows-ccx`. Unzip it into one folder. It contains
+   `Install.cmd`, `Uninstall.cmd`, `install.ps1`, `اقرأني.txt` and `MultimediaAIGroup-<version>.ccx`.
 2. Close Premiere Pro.
-3. Double-click the `.ccx`. Creative Cloud opens and warns that the plugin is not from the
-   Marketplace; click **Install**.
+3. Double-click **`Install.cmd`** (if Windows says "protected your PC": *More info → Run anyway*).
+   - It first uses Adobe's own plugin installer (`UnifiedPluginInstallerAgent.exe`), which is on the
+     machine with Premiere's Creative Cloud components even if the Creative Cloud app is never opened.
+   - If that is not on the machine, it asks, then installs directly into
+     `%APPDATA%\Adobe\UXP\Plugins\External` and registers the plugin in
+     `%APPDATA%\Adobe\UXP\PluginsInfo\v1\PPRO.json` (backup kept). Adobe documents this side-load
+     route for other apps but not for Premiere; if the panel does not appear, enable
+     *Settings › Plugins › Enable developer mode* and restart Premiere.
+   - With the Creative Cloud app installed, double-clicking the `.ccx` itself also works.
 4. Open Premiere Pro → **Window › UXP Plugins › Multimedia & AI Group**. Dock the panel.
 
-The first start can take up to ~30 seconds while Windows Defender scans the new files.
-After that the engine starts in a few seconds.
+Remove it with `Uninstall.cmd`.
 
 ## Use the language button
 

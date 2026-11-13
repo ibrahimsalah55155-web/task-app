@@ -201,3 +201,52 @@ Compress-Archive -Path (Join-Path $Pkg "*") -DestinationPath ($Ccx -replace '\.c
 Move-Item ($Ccx -replace '\.ccx$', '.zip') $Ccx
 $SizeMb = [math]::Round((Get-Item $Ccx).Length / 1MB, 1)
 Write-Host "Built $Ccx ($SizeMb MB)"
+
+# ---- 7. download folder: .ccx + installer that needs no Creative Cloud app --------------------
+Say "Preparing the download folder (installer without Creative Cloud)"
+$Dl = Join-Path $Out "MultimediaAIGroup-$Version"
+New-Item -ItemType Directory -Force -Path $Dl | Out-Null
+Move-Item $Ccx $Dl
+Copy-Item (Join-Path $PSScriptRoot "windows\*") $Dl
+$Ccx = Join-Path $Dl "MultimediaAIGroup-$Version.ccx"
+
+if (-not $SkipTests) {
+  Say "Testing the installer (direct method) in a scratch UXP folder"
+  $Uxp = Join-Path $Work "uxp-test"
+  $Info = Join-Path $Uxp "PluginsInfo\v1\PPRO.json"
+  New-Item -ItemType Directory -Force -Path (Split-Path $Info) | Out-Null
+  # another plugin already registered: it must survive install, upgrade and uninstall
+  '{"plugins":[{"hostMinVersion":"25.6.0","name":"Other","path":"$localPlugins\\External\\other_1.0.0","pluginId":"other.plugin","status":"enabled","type":"uxp","versionString":"1.0.0"}]}' |
+    Set-Content -Path $Info -Encoding UTF8
+  foreach ($round in 1, 2) {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Dl "install.ps1") -Mode direct -Yes -Quiet -UxpRoot $Uxp
+    Must "installer round $round"
+  }
+  $j = Get-Content $Info -Raw | ConvertFrom-Json
+  $ids = @($j.plugins | ForEach-Object { $_.pluginId })
+  Write-Host "registered: $($ids -join ', ')"
+  if ($ids.Count -ne 2 -or -not ($ids -contains "other.plugin") -or -not ($ids -contains "com.multimediaai.podcaststudio")) { throw "PPRO.json not as expected" }
+  $mine = $j.plugins | Where-Object { $_.pluginId -eq "com.multimediaai.podcaststudio" }
+  $dir = Join-Path $Uxp ("Plugins\External\com.multimediaai.podcaststudio_$Version")
+  foreach ($f in "manifest.json", "index.js", "win\x64\mag_engine.uxpaddon", "engine\python\pythonw.exe", "engine\ffmpeg\ffmpeg.exe") {
+    if (-not (Test-Path (Join-Path $dir $f))) { throw "missing after install: $f" }
+  }
+  if ($mine.path -ne "`$localPlugins\External\com.multimediaai.podcaststudio_$Version") { throw "bad path entry: $($mine.path)" }
+  if (@(Get-ChildItem (Split-Path $Info) -Filter "PPRO.json.bak-*").Count -lt 1) { throw "no backup of PPRO.json" }
+  Write-Host "OK: installed, upgraded in place, other plugin kept, backup made"
+
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Dl "install.ps1") -Uninstall -Mode direct -Quiet -UxpRoot $Uxp
+  Must "uninstall"
+  $j = Get-Content $Info -Raw | ConvertFrom-Json
+  if (@($j.plugins).Count -ne 1 -or $j.plugins[0].pluginId -ne "other.plugin" -or (Test-Path $dir)) { throw "uninstall did not clean up" }
+  Write-Host "OK: uninstall removed only this plugin"
+
+  Say "Testing the installer with no PPRO.json at all (fresh machine)"
+  $Uxp2 = Join-Path $Work "uxp-fresh"
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Dl "install.ps1") -Yes -Quiet -UxpRoot $Uxp2
+  Must "fresh install (auto mode)"
+  $j = Get-Content (Join-Path $Uxp2 "PluginsInfo\v1\PPRO.json") -Raw | ConvertFrom-Json
+  if (@($j.plugins).Count -ne 1) { throw "fresh PPRO.json wrong" }
+  Get-Content (Join-Path $Uxp2 "PluginsInfo\v1\PPRO.json") | Write-Host
+}
+Get-ChildItem $Dl | ForEach-Object { Write-Host ("  " + $_.Name) }

@@ -1,0 +1,28 @@
+﻿طريقة تسطيب البلجن «مجموعة الملتيميديا والذكاء الاصطناعي» في البريمير
+(من غير ما تفتح Creative Cloud)
+
+1) فك الضغط عن الملف اللي نزّلته (كليك يمين ← Extract All) في فولدر واحد.
+   لازم يبقى فيه: Install.cmd و install.ps1 و ملف MultimediaAIGroup-....ccx
+
+2) اقفل البريمير.
+
+3) دبل كليك على Install.cmd
+   - لو الويندوز طلّع رسالة «Windows protected your PC»: دوس More info ← Run anyway.
+   - البرنامج بيجرّب الأول برنامج التسطيب بتاع أدوبي (بييجي مع البريمير حتى لو مش بتفتح Creative Cloud).
+   - لو مش موجود، هيسألك: «أسطب البلجن مباشرةً؟» ← دوس Yes.
+
+4) افتح البريمير ← Window ← UXP Plugins ← Multimedia & AI Group
+
+لو البلجن مظهرش في القايمة:
+   البريمير ← Edit ← Preferences (أو Settings) ← Plugins ← فعّل «Enable developer mode»
+   واقفل البريمير وافتحه تاني.
+
+لشيل البلجن: دبل كليك على Uninstall.cmd
+
+ملاحظات:
+- أول مرة تفتح البانل ممكن ياخد لحد 30 ثانية (الويندوز بيفحص الملفات).
+- التسطيب المباشر بيحط البلجن في:
+  %APPDATA%\Adobe\UXP\Plugins\External
+  وبيعمل نسخة احتياطية من ملف التسجيل:
+  %APPDATA%\Adobe\UXP\PluginsInfo\v1\PPRO.json
+- لو حصلت أي مشكلة صوّر الرسالة وابعتهالي.
