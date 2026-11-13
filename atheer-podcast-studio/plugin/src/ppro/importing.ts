@@ -18,7 +18,7 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 interface Found { clip: ClipProjectItem; item: ProjectItem; parent: FolderItem }
 
-async function walk(folder: FolderItem, visit: (item: ProjectItem, parent: FolderItem) => Promise<void>, depth = 0): Promise<void> {
+export async function walk(folder: FolderItem, visit: (item: ProjectItem, parent: FolderItem) => Promise<void>, depth = 0): Promise<void> {
   const P = ppro();
   for (const item of await folder.getItems()) {
     await visit(item, folder);
@@ -68,8 +68,14 @@ async function locate(project: Project, paths: string[], taken: Set<ProjectItem>
   return out;
 }
 
+/**
+ * `item` is what editing actions need (insert/overwrite refuse the cast object with "Invalid
+ * parameter"); `clip` is for clip methods (media path, sequence from media, subclips).
+ */
+export interface Imported { item: ProjectItem; clip: ClipProjectItem }
+
 export async function importAndFind(project: Project, paths: string[], bin: FolderItem,
-                                    opts: { timeoutMs?: number; reuse?: boolean } = {}): Promise<Map<string, ClipProjectItem>> {
+                                    opts: { timeoutMs?: number; reuse?: boolean } = {}): Promise<Map<string, Imported>> {
   const timeoutMs = opts.timeoutMs ?? 20000;
   const taken = new Set<ProjectItem>();
   let found = opts.reuse === false ? new Map<string, Found>() : await locate(project, paths, taken);
@@ -105,7 +111,7 @@ export async function importAndFind(project: Project, paths: string[], bin: Fold
       log.debug(`could not move imported items into the bin: ${errorMessage(e)}`);
     }
   }
-  return new Map([...found].map(([p, f]) => [p, f.clip]));
+  return new Map([...found].map(([p, f]) => [p, { item: f.item, clip: f.clip }]));
 }
 
 function sameBin(a: FolderItem, b: FolderItem): boolean {

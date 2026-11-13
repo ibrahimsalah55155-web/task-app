@@ -8,12 +8,12 @@
  * replaced. When it does not exist yet, an insert at index = track count makes
  * Premiere create it (documented behaviour of createInsertProjectItemAction).
  */
-import type { ClipProjectItem, FolderItem, Project, ProjectItem, Sequence, VideoClipTrackItem } from "@adobe/premierepro";
+import type { ClipProjectItem, FolderItem, Project, Sequence, VideoClipTrackItem } from "@adobe/premierepro";
 import { logger } from "../core/log.ts";
 import { parseTicks } from "../core/time.ts";
 import { ppro } from "./api.ts";
 import { ROOT_BIN, ensureProjectBins, findChildBin } from "./edits.ts";
-import { importAndFind } from "./importing.ts";
+import { type Imported, importAndFind } from "./importing.ts";
 import { finishTransaction } from "./transaction.ts";
 
 const log = logger("graphics");
@@ -58,11 +58,9 @@ export async function graphicsBin(project: Project): Promise<FolderItem> {
   return bin;
 }
 
-/** Import (once) and return the project item for a rendered file. */
-export async function importGraphic(project: Project, path: string): Promise<ClipProjectItem> {
+/** Import (once) and return the project item (for edits) and its clip (for clip methods). */
+export async function importGraphic(project: Project, path: string): Promise<Imported> {
   const bin = await graphicsBin(project);
-  const existing = await findClipByPath(bin, path);
-  if (existing) return existing;
   const found = await importAndFind(project, [path], bin);
   return found.get(path)!;
 }
@@ -76,7 +74,7 @@ export interface Placement {
 export async function insertGraphicAtPlayhead(project: Project, sequence: Sequence, path: string,
                                               durationSeconds: number): Promise<Placement> {
   const P = ppro();
-  const clip = await importGraphic(project, path);
+  const imported = await importGraphic(project, path);
   const start = parseTicks((await sequence.getPlayerPosition()).ticks);
   const end = start + BigInt(Math.round(durationSeconds * 254016000000));
 
@@ -93,7 +91,7 @@ export async function insertGraphicAtPlayhead(project: Project, sequence: Sequen
   }
   const { index, isNew } = chooseTrack(tracks, { start, end });
   const editor = P.SequenceEditor.getEditor(sequence);
-  const item = clip as unknown as ProjectItem;
+  const item = imported.item;
   const undo = "MAG: Insert graphic";
   let committed = false;
   project.lockedAccess(() => {

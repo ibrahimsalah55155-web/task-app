@@ -3,7 +3,7 @@
  * put them on one free track above everything, each at its exact start, then
  * trim/extend each to its exact end (stills can be any length).
  */
-import type { FolderItem, Project, ProjectItem, Sequence, VideoClipTrackItem } from "@adobe/premierepro";
+import type { FolderItem, Project, Sequence, VideoClipTrackItem } from "@adobe/premierepro";
 import { logger } from "../core/log.ts";
 import { parseTicks } from "../core/time.ts";
 import { ppro } from "./api.ts";
@@ -65,7 +65,7 @@ export async function placeStills(project: Project, seq: Sequence, stills: Timed
   const editor = P.SequenceEditor.getEditor(seq);
   const undo = "MAG: Add captions";
   const at = (s: TimedStill) => P.TickTime.createWithTicks(String(secondsToTicks(s.start)));
-  const item = (s: TimedStill) => clips.get(s.path)! as unknown as ProjectItem;
+  const item = (s: TimedStill) => clips.get(s.path)!.item;
 
   let rest = sorted;
   if (isNew) {

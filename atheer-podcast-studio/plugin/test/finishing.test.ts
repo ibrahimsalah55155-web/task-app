@@ -117,3 +117,24 @@ test("MOGRT: inserted on a free track at the playhead; JSON and plain text field
   (fields[1]!.param as unknown as { rejectStrings: boolean }).rejectStrings = true;
   assert.equal(await setMogrtText(project as never, fields[1]!, "x"), false);
 });
+
+test("voice clean-up for sound inside camera files: cleaned pieces on a new track at the same frames, original muted, and back", async () => {
+  const { placeCleanAudio, removeCleanAudio } = await import("../src/ppro/finishing.ts");
+  const cam = new FakeClip("RobertRaw.mp4", "C:\\Shoot\\RobertRaw.mp4");
+  const s2 = new FakeSequence("ROBERT", [new FakeTrack("V1", [new FakeTrackItem(cam, 0, 10 * TPS, 0), new FakeTrackItem(cam, 10 * TPS, 15 * TPS, 20 * TPS)])],
+    [new FakeTrack("Robert audio", [new FakeTrackItem(cam, 0, 10 * TPS, 0), new FakeTrackItem(cam, 10 * TPS, 15 * TPS, 20 * TPS)])], F);
+  s2.project = project;
+  project.sequences.push(s2);
+  const bin = new FakeFolder("02 Audio");
+  project.root.items.push(bin);
+  const r = await placeCleanAudio(project as never, s2 as never, new Map([["C:\\Shoot\\RobertRaw.mp4", "C:\\Proj\\MAG Clean Audio\\RobertRaw_MAG_clean_standard.wav"]]), bin as never);
+  assert.deepEqual(r, { tracks: 1, pieces: 2, muted: [0] });
+  assert.equal(s2.audio.length, 2);
+  assert.equal(s2.audio[1]!.name, "Robert audio · MAG clean");
+  assert.deepEqual(s2.audio[1]!.items.map((i) => [i.start / TPS, i.end / TPS, i.clip!.sub!.inT / TPS]), [[0, 10, 0], [10, 15, 20]]);
+  assert.equal(s2.audio[0]!.muted, true);
+  assert.equal(s2.video[0]!.items.length, 2, "picture untouched");
+  assert.equal(await removeCleanAudio(project as never, s2 as never, r.muted), 2);
+  assert.equal(s2.audio[0]!.muted, false);
+  assert.equal(s2.audio[1]!.items.length, 0);
+});

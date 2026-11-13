@@ -12,6 +12,8 @@ export interface Prefs {
   rules: [string, string][];
   /** Voice clean-up: cleaned file -> original file, to switch back. */
   cleanMap: Record<string, string>;
+  /** Voice clean-up of sound inside video files: per sequence guid, the original audio tracks muted. */
+  cleanMuted: Record<string, number[]>;
   mogrtDir: string | null;
 }
 
@@ -27,6 +29,7 @@ export const DEFAULT_PREFS: Prefs = {
   glossary: [],
   rules: [],
   cleanMap: {},
+  cleanMuted: {},
   mogrtDir: null,
 };
 

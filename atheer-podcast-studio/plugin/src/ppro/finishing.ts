@@ -358,3 +358,138 @@ export async function setMogrtText(project: Project, field: MogrtField, text: st
   const got = typeof now === "string" && field.json ? (JSON.parse(now) as { textEditValue?: string }).textEditValue : now;
   return got === text;
 }
+
+// ---- voice clean-up for sound recorded inside video files ------------------------------
+
+export const CLEAN_TRACK_SUFFIX = " · MAG clean";
+
+/**
+ * Sound that lives inside camera files cannot be swapped (the picture would go). Instead the
+ * cleaned audio is laid on a new audio track under each original one, piece for piece at the
+ * same frames (subclips of the cleaned WAV with the clip's own in point), and the original
+ * track is muted. Undo: removeCleanTracks().
+ */
+export async function placeCleanAudio(project: Project, seq: Sequence, cleanBySource: Map<string, string>,
+                                      bin: FolderItem): Promise<{ tracks: number; pieces: number; muted: number[] }> {
+  const P = ppro();
+  const { readLiveItems } = await import("./cutengine.ts");
+  const { importAndFind, walk } = await import("./importing.ts");
+  const live = (await readLiveItems(seq)).filter((l) => l.src.kind === "audio");
+  const pieces: { l: (typeof live)[number]; clean: string; media: string }[] = [];
+  for (const l of live) {
+    const media = norm(await l.clip.getMediaFilePath());
+    const clean = [...cleanBySource].find(([src]) => norm(src) === media)?.[1];
+    if (clean && l.src.speed === 1) pieces.push({ l, clean, media });
+  }
+  if (!pieces.length) return { tracks: 0, pieces: 0, muted: [] };
+  const imported = await importAndFind(project, [...new Set(pieces.map((p) => p.clean))], bin);
+
+  // subclips: exact media range of every piece
+  const run = Math.random().toString(36).slice(2, 7).toUpperCase();
+  const undo = "MAG: Clean audio";
+  let committed = false;
+  project.lockedAccess(() => {
+    const actions = pieces.map((p, i) => imported.get(p.clean)!.clip.createSubClipAction(
+      `${p.clean.split(/[\\/]/).pop()} [${run}-${i}]`,
+      P.TickTime.createWithTicks(String(p.l.src.inPoint)),
+      P.TickTime.createWithTicks(String(p.l.src.inPoint + (p.l.src.end - p.l.src.start))),
+      true, { takeVideo: false, takeAudio: true }));
+    committed = project.executeTransaction((compound) => {
+      for (const a of actions) compound.addAction(a);
+    }, undo);
+  });
+  finishTransaction(committed, undo, pieces.length);
+  const subs = new Map<number, ProjectItem>();
+  const tag = new RegExp(`\\[${run}-(\\d+)\\]$`);
+  const deadline = Date.now() + 10000;
+  while (subs.size < pieces.length && Date.now() < deadline) {
+    await walk(await project.getRootItem(), async (item) => {
+      const m = tag.exec(item.name);
+      if (m) subs.set(Number(m[1]), item);
+    });
+    if (subs.size < pieces.length) await new Promise((r) => setTimeout(r, 300));
+  }
+  if (subs.size < pieces.length) throw new Error(`Premiere made ${subs.size} of ${pieces.length} clean-audio pieces.`);
+
+  // one new track per original audio track, then mute the original
+  const editor = P.SequenceEditor.getEditor(seq);
+  const byTrack = new Map<number, number[]>();
+  pieces.forEach((p, i) => byTrack.set(p.l.src.track, [...(byTrack.get(p.l.src.track) ?? []), i]));
+  const muted: number[] = [];
+  for (const [track, idxs] of byTrack) {
+    const target = await seq.getAudioTrackCount();
+    const [first, ...rest] = idxs;
+    const at = (i: number) => P.TickTime.createWithTicks(String(pieces[i]!.l.src.start));
+    committed = false;
+    project.lockedAccess(() => {
+      const action = editor.createInsertProjectItemAction(subs.get(first!)!, at(first!), 0, target, true);
+      committed = project.executeTransaction((compound) => {
+        compound.addAction(action);
+      }, undo);
+    });
+    finishTransaction(committed, undo, 1);
+    if (rest.length) {
+      committed = false;
+      project.lockedAccess(() => {
+        const actions = rest.map((i) => editor.createOverwriteItemAction(subs.get(i)!, at(i), 0, target));
+        committed = project.executeTransaction((compound) => {
+          for (const a of actions) compound.addAction(a);
+        }, undo);
+      });
+      finishTransaction(committed, undo, rest.length);
+    }
+    const orig = await seq.getAudioTrack(track);
+    const added = await seq.getAudioTrack(target);
+    try {
+      let named = false;
+      const origName = (orig as unknown as { name?: string }).name ?? `A${track + 1}`;
+      project.lockedAccess(() => {
+        const action = (added as unknown as { createSetNameAction(s: string): import("@adobe/premierepro").Action })
+          .createSetNameAction(`${origName}${CLEAN_TRACK_SUFFIX}`);
+        named = project.executeTransaction((compound) => {
+          compound.addAction(action);
+        }, undo);
+      });
+      finishTransaction(named, undo, 1);
+    } catch (e) {
+      log.debug(`clean track not renamed: ${errorMessage(e)}`);
+    }
+    await orig.setMute(true);
+    muted.push(track);
+  }
+  return { tracks: byTrack.size, pieces: pieces.length, muted };
+}
+
+/** Remove the clean-audio tracks' clips and unmute the given original tracks. */
+export async function removeCleanAudio(project: Project, seq: Sequence, unmute: number[]): Promise<number> {
+  const P = ppro();
+  const victims: unknown[] = [];
+  for (let i = 0; i < (await seq.getAudioTrackCount()); i++) {
+    const tr = await seq.getAudioTrack(i);
+    const name = (tr as unknown as { name?: string }).name ?? "";
+    if (name.endsWith(CLEAN_TRACK_SUFFIX)) victims.push(...tr.getTrackItems(P.Constants.TrackItemType.CLIP, false));
+  }
+  if (victims.length) {
+    const editor = P.SequenceEditor.getEditor(seq);
+    const undo = "MAG: Original audio";
+    let committed = false;
+    project.lockedAccess(() => {
+      P.TrackItemSelection.createEmptySelection((sel) => {
+        for (const v of victims) sel.addItem(v as never, true);
+        const action = editor.createRemoveItemsAction(sel, false, P.Constants.MediaType.ANY, false);
+        committed = project.executeTransaction((compound) => {
+          compound.addAction(action);
+        }, undo);
+      });
+    });
+    finishTransaction(committed, undo, victims.length);
+  }
+  for (const i of unmute) {
+    try {
+      await (await seq.getAudioTrack(i)).setMute(false);
+    } catch {
+      /* track gone */
+    }
+  }
+  return victims.length;
+}

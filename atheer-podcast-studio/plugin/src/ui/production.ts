@@ -49,7 +49,16 @@ export abstract class Stage {
     this.message = null;
     this.host.rerender();
     try {
-      await fn();
+      try {
+        await fn();
+      } catch (e) {
+        // Premiere drops its script objects when the active sequence/project changes underneath;
+        // the actions fetch fresh objects at the start, so one retry is safe.
+        if (!/no longer valid/i.test(errorMessage(e))) throw e;
+        log.warn("Premiere objects went stale; retrying once with fresh ones");
+        await new Promise((r) => setTimeout(r, 300));
+        await fn();
+      }
     } catch (e) {
       log.error("Stage action failed", e);
       this.error = errorMessage(e);

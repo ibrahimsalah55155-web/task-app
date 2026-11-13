@@ -10,12 +10,12 @@
  * track at its exact start. Camera audio stays available but muted, so there
  * is no double audio.
  */
-import type { ClipProjectItem, FolderItem, Project, ProjectItem, Sequence } from "@adobe/premierepro";
+import type { FolderItem, Project, ProjectItem, Sequence } from "@adobe/premierepro";
 import { logger } from "../core/log.ts";
 import { ppro } from "./api.ts";
 import { CHILD_BINS, ROOT_BIN, ensureProjectBins, findChildBin } from "./edits.ts";
 import { secondsToTicks } from "./timeline.ts";
-import { importAndFind } from "./importing.ts";
+import { type Imported, importAndFind } from "./importing.ts";
 import { finishTransaction } from "./transaction.ts";
 
 const log = logger("build");
@@ -95,7 +95,7 @@ export function insertionOrder(items: BuildItem[]): BuildItem[] {
 }
 
 
-async function importInto(project: Project, bin: FolderItem, paths: string[]): Promise<Map<string, ClipProjectItem>> {
+async function importInto(project: Project, bin: FolderItem, paths: string[]): Promise<Map<string, Imported>> {
   if (!paths.length) return new Map();
   return await importAndFind(project, paths, bin);
 }
@@ -120,7 +120,7 @@ export async function buildSyncedSequence(project: Project, plan: BuildPlan): Pr
   // New sequence with the first camera's settings, then emptied.
   const first = cams[0] ?? sounds[0]!;
   const before = new Set((await project.getSequences()).map((s) => s.guid.toString()));
-  const created = await project.createSequenceFromMedia(plan.name, [clipOf(first)], seqBin as unknown as ProjectItem);
+  const created = await project.createSequenceFromMedia(plan.name, [clipOf(first).clip], seqBin as unknown as ProjectItem);
   const seq = created ?? (await project.getSequences()).find((s) => !before.has(s.guid.toString()));
   if (!seq) throw new Error("The new sequence was not created.");
   await clearSequence(project, seq);
@@ -134,7 +134,7 @@ export async function buildSyncedSequence(project: Project, plan: BuildPlan): Pr
     let committed = false;
     project.lockedAccess(() => {
       const action = editor.createInsertProjectItemAction(
-        clipOf(it) as unknown as ProjectItem,
+        clipOf(it).item,
         P.TickTime.createWithTicks(String(secondsToTicks(Math.max(0, it.seqStart)))),
         video.get(it) ?? 0,
         audio.get(it) ?? 0,

@@ -5,7 +5,7 @@ import { type SolverState, KEYS, error, good, neutral, startSolver, step } from 
 import { errorMessage, logger } from "../core/log.ts";
 import { ppro } from "../ppro/api.ts";
 import {
-  clipsUsingFile, ensureLumetri, exportFrame, freeVideoTrack, insertMogrt, isAudioFile, lumetriParams, mogrtFields, nestForMulticam,
+  clipsUsingFile, ensureLumetri, placeCleanAudio, removeCleanAudio, exportFrame, freeVideoTrack, insertMogrt, isAudioFile, lumetriParams, mogrtFields, nestForMulticam,
   probeSequence, setLumetri, setMogrtText, swapMedia, type MogrtField,
 } from "../ppro/finishing.ts";
 import { guessRoles, readTimeline, type TimelineSpec } from "../ppro/timeline.ts";
@@ -15,6 +15,15 @@ import { type PhaseHost, choice, joinPath, liveSequence, pickFolder, projectDir,
 import { Stage } from "./production.ts";
 
 const log = logger("finishing");
+
+async function audioBin(project: import("@adobe/premierepro").Project) {
+  const { CHILD_BINS, ROOT_BIN, ensureProjectBins, findChildBin } = await import("../ppro/edits.ts");
+  await ensureProjectBins(project);
+  const app = await findChildBin(await project.getRootItem(), ROOT_BIN);
+  const bin = app ? await findChildBin(app, CHILD_BINS[1]) : null;
+  if (!bin) throw new Error("Project bins are missing.");
+  return bin;
+}
 const base = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
 export class FinishView extends Stage {
@@ -49,15 +58,26 @@ export class FinishView extends Stage {
       const live = await liveSequence();
       if (!live) throw new Error(t("needSeqFirst"));
       const files = [...new Set(tl.audio.filter((a) => this.mics!.includes(a.index)).flatMap((a) => a.pieces.map((p) => p.path)))];
-      const video = files.filter((f) => !isAudioFile(f));
-      for (const v of video) this.host.notify("warn", t("cleanVideoSkip", { name: base(v) }));
+      const guid = live.seq.guid.toString();
+      // Sound inside camera files is cleaned too, but placed on new tracks (the file itself cannot be swapped).
+      const video = this.host.prefs.cleanMuted[guid]?.length ? [] : files.filter((f) => !isAudioFile(f));
       const audio = files.filter(isAudioFile).filter((f) => !this.host.prefs.cleanMap[f]); // already-clean files are not cleaned twice
-      if (!audio.length) throw new Error(t("cleanNoMics"));
+      if (!audio.length && !video.length) throw new Error(t("cleanNoMics"));
       const res = await this.host.client().runJob<{ files: CleanResult[] }>("cleanup", {
-        files: audio, preset: this.preset, target: this.target, outDir: joinPath(dir, "MAG Clean Audio"),
+        files: [...audio, ...video], preset: this.preset, target: this.target, outDir: joinPath(dir, "MAG Clean Audio"),
       }, this.onJob);
       this.message = t("working");
-      const reports = await swapMedia(live.project, res.files.map((f) => ({ from: f.source, to: f.output })));
+      const isVid = (f: CleanResult) => video.includes(f.source);
+      const reports = await swapMedia(live.project, res.files.filter((f) => !isVid(f)).map((f) => ({ from: f.source, to: f.output })));
+      if (video.length) {
+        const fresh = await liveSequence();
+        if (!fresh) throw new Error(t("needSeqFirst"));
+        const bin = await audioBin(fresh.project);
+        const placed = await placeCleanAudio(fresh.project, fresh.seq,
+          new Map(res.files.filter(isVid).map((f) => [f.source, f.output])), bin);
+        if (placed.muted.length) this.host.prefs.cleanMuted[guid] = placed.muted;
+        this.host.notify("ok", t("cleanPlaced", { n: placed.pieces, tracks: placed.tracks }));
+      }
       let clips = 0;
       for (const r of reports) {
         clips += r.clips;
@@ -77,9 +97,14 @@ export class FinishView extends Stage {
       const live = await liveSequence();
       if (!live) throw new Error(t("needSeqFirst"));
       const pairs = Object.entries(this.host.prefs.cleanMap).map(([to, from]) => ({ from: to, to: from }));
-      if (!pairs.length) throw new Error(t("cleanNothing"));
-      const reports = await swapMedia(live.project, pairs);
+      const guid = live.seq.guid.toString();
       let n = 0;
+      if (this.host.prefs.cleanMuted[guid]) {
+        n += await removeCleanAudio(live.project, live.seq, this.host.prefs.cleanMuted[guid]!);
+        delete this.host.prefs.cleanMuted[guid];
+      }
+      if (!pairs.length && !n) throw new Error(t("cleanNothing"));
+      const reports = pairs.length ? await swapMedia(live.project, pairs) : [];
       for (const r of reports) {
         n += r.clips;
         if (!r.failed.length) delete this.host.prefs.cleanMap[r.file];
@@ -229,7 +254,8 @@ export class FinishView extends Stage {
     const tl = this.tl;
     const audio = tl?.audio.filter((a) => a.pieces.length) ?? [];
     const cams = tl?.video.filter((v) => v.pieces.length) ?? [];
-    const cleaned = Object.keys(this.host.prefs.cleanMap).length;
+    const g = this.host.snapshot()?.activeSequence?.guid;
+    const cleaned = Object.keys(this.host.prefs.cleanMap).length + (g && this.host.prefs.cleanMuted[g]?.length ? 1 : 0);
     return [
       card(t("audioTitle"), cleaned ? pill(String(cleaned), "ok") : null,
         h("p", { class: "muted small" }, t("audioHelp")),

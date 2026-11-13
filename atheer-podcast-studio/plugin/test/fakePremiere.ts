@@ -511,7 +511,9 @@ export function buildFake(): Fake {
   const project = new FakeProject(seq);
   const module = {
     Project: { getActiveProject: async () => project },
-    ClipProjectItem: { cast: (x: unknown) => x },
+    // Like Premiere: cast() returns a different object; editing actions refuse it ("Invalid parameter")
+    // and need the project item itself.
+    ClipProjectItem: { cast: (x: unknown) => castClip(x) },
     FolderItem: {
       cast: (x: unknown) => {
         if (!(x instanceof FakeFolder)) throw new Error("not a folder");
@@ -552,6 +554,27 @@ export function buildFake(): Fake {
   return { module, project, sequence: seq };
 }
 
+function castClip(x: unknown): unknown {
+  if (x === null || typeof x !== "object") return x;
+  if ((x as { __cast?: boolean }).__cast) return x;
+  return new Proxy(x as object, {
+    get: (t, k) => {
+      if (k === "__cast") return true;
+      if (k === "__target") return t;
+      const v = (t as Record<string | symbol, unknown>)[k];
+      return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(t) : v;
+    },
+    set: (t, k, v) => {
+      (t as Record<string | symbol, unknown>)[k] = v;
+      return true;
+    },
+  });
+}
+
+function refuseCast(item: unknown): void {
+  if (item && (item as { __cast?: boolean }).__cast) throw new Error("Invalid parameter.");
+}
+
 /** Overwrite semantics: the new clip replaces whatever overlaps it on that track. */
 export const editorFaults = { wrongLength: false };
 
@@ -572,6 +595,7 @@ function fakeEditor(seq: FakeSequence) {
   return {
     createOverwriteItemAction(clip: FakeClip, time: FakeTickTime, v: number, a: number) {
       requireLock("createOverwriteItemAction");
+      refuseCast(clip);
       return new Action(`overwrite:${clip.name}`, () => {
         if (!clip.sub) {
           overwrite(seq.video[v]!, new FakeTrackItem(clip, time.ticksNumber, time.ticksNumber + clip.lengthTicks, 0));
@@ -586,6 +610,7 @@ function fakeEditor(seq: FakeSequence) {
     },
     createInsertProjectItemAction(clip: FakeClip, time: FakeTickTime, v: number, a: number, limitShift: boolean) {
       requireLock("createInsertProjectItemAction");
+      refuseCast(clip);
       if (!limitShift) throw new Error("insert must not shift other tracks");
       if (clip.isCaption && seq.project?.captionInsert === "refuse") throw new Error("Unsupported media type");
       return new Action(`insert:${clip.name}`, () => {
@@ -599,6 +624,17 @@ function fakeEditor(seq: FakeSequence) {
           if (idx === tracks.length) tracks.push(new FakeTrack(`${kind} ${tracks.length + 1}`, []));
           overwrite(tracks[idx]!, new FakeTrackItem(clip, time.ticksNumber, time.ticksNumber + clip.lengthTicks, 0));
         };
+        if (clip.sub) {
+          const len = clip.sub.outT - clip.sub.inT;
+          const put = (tracks: FakeTrack[], idx: number, kind: string) => {
+            if (idx > tracks.length) throw new Error(`${kind} track ${idx + 1} requested but only ${tracks.length} exist`);
+            if (idx === tracks.length) tracks.push(new FakeTrack(`${kind} ${tracks.length + 1}`, []));
+            overwrite(tracks[idx]!, new FakeTrackItem(clip, time.ticksNumber, time.ticksNumber + len, 0));
+          };
+          if (clip.sub.video) put(seq.video, v, "Video");
+          if (clip.sub.audio) put(seq.audio, a, "Audio");
+          return;
+        }
         if (clip.hasVideo) place(seq.video, v, "Video");
         if (clip.hasAudio) place(seq.audio, a, "Audio");
       });
