@@ -31,7 +31,8 @@ def test_arabic_speech_is_transcribed_with_word_times(tmp_path):
     cache = AudioCache(FFMPEG, tmp_path / "c")
     tracks = [{"name": "mic", "pieces": [{"path": str(wav), "srcIn": 0, "seqStart": 2.0, "dur": dur}]}]
     res = transcribe_tracks(cache, tracks, dur + 2.0, WhisperBackend(os.environ.get("ASR_MODEL", "small"),
-                            tmp_path / "models"), "ar", tmp_path / "t", "real")
+                            tmp_path / "models", glossary=["البودكاست", "الأحفاد"]), "ar", tmp_path / "t", "real",
+                            replacements=[("الجده", "الجدة"), ("حيات", "حياة")])
     words = [w for s in res["segments"] for w in s["words"]]
     joined = " ".join(w["word"] for w in words)
     print(joined)
@@ -41,3 +42,4 @@ def test_arabic_speech_is_transcribed_with_word_times(tmp_path):
     assert starts == sorted(starts)
     assert starts[0] >= 1.5  # speech starts at 2.0 s on the sequence
     assert any(k in joined for k in ("الجدة", "البودكاست", "حلقة", "الأحفاد"))
+    print("corrections:", res.get("corrected"))
