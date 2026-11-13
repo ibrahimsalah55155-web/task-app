@@ -10,7 +10,8 @@
  */
 import { CompanionClient, CompanionError, type Capabilities, type Health, type Job, type ProbeResult,
   type TokenStore } from "../companion/client.ts";
-import { type EngineAddon, loadAddon, startBuiltInEngine } from "../companion/engine.ts";
+import { type PluginFiles, canAutostart, connectAutostart, uxpPluginFiles } from "../companion/autostart.ts";
+import { type EngineAddon, loadAddonAsync, startBuiltInEngine } from "../companion/engine.ts";
 import { errorMessage, formatEntry, getEntries, logger, onLog, setLogLevel } from "../core/log.ts";
 import { type Prefs, loadPrefs, savePrefs } from "../core/prefs.ts";
 import { formatDuration, formatFps, ticksToTimecode } from "../core/time.ts";
@@ -47,7 +48,7 @@ interface State {
   busy: string | null;
   notice: { tone: Tone; text: string } | null;
   engine: {
-    mode: "builtin" | "external";
+    mode: "builtin" | "autostart" | "external";
     status: EngineStatus;
     health: Health | null;
     caps: Capabilities | null;
@@ -65,6 +66,8 @@ export class PanelApp {
   private readonly tokens: TokenStore;
   private client: CompanionClient;
   private addon: EngineAddon | null = null;
+  private addonProblem: string | null = null;
+  private files: PluginFiles | null = null;
   private state: State;
   private healthTimer: ReturnType<typeof setInterval> | null = null;
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -144,8 +147,7 @@ export class PanelApp {
       setLang(this.prefs.lang ?? "en");
       log.error("Could not read host information", e);
     }
-    this.addon = loadAddon();
-    this.state.engine.mode = this.addon ? "builtin" : "external";
+    this.state.engine.mode = "builtin";
     this.unsubscribeLog = onLog(() => this.renderLog());
     this.listenToPremiere();
     this.render();
@@ -303,15 +305,58 @@ export class PanelApp {
 
   // ---- engine ---------------------------------------------------------------
 
+  /**
+   * Which way the engine runs, decided once: the native launcher (normal), Windows (when
+   * Premiere does not run the launcher, e.g. installed without Creative Cloud), or an engine
+   * started by hand (development builds).
+   */
+  private async chooseEngineMode(): Promise<void> {
+    if (this.addon || this.state.engine.mode === "external" || this.state.engine.mode === "autostart") return;
+    const load = await loadAddonAsync();
+    this.addon = load.addon;
+    this.addonProblem = load.problem;
+    if (this.addon) {
+      this.state.engine.mode = "builtin";
+      return;
+    }
+    try {
+      this.files = uxpPluginFiles();
+      if (await canAutostart(this.files)) {
+        this.state.engine.mode = "autostart";
+        if (load.problem) log.info("Using the engine started by Windows instead of the native launcher.");
+        return;
+      }
+    } catch (e) {
+      log.debug(`autostart check failed: ${errorMessage(e)}`);
+    }
+    this.state.engine.mode = "external";
+  }
+
   private async startEngine(): Promise<void> {
-    if (this.state.engine.mode === "external" || !this.addon) {
+    await this.chooseEngineMode();
+    const mode = this.state.engine.mode;
+    if (mode === "external") {
       await this.checkEngine(false);
       return;
     }
     this.setEngine({ status: "starting", error: null });
     try {
-      const started = await startBuiltInEngine(this.addon);
-      this.client = started.client;
+      if (mode === "builtin") {
+        try {
+          this.client = (await startBuiltInEngine(this.addon!)).client;
+        } catch (e) {
+          // The launcher loaded but cannot start the engine here: use Windows instead when possible.
+          this.files ??= uxpPluginFiles();
+          if (!(await canAutostart(this.files))) throw e;
+          log.warn(`Native launcher failed (${errorMessage(e)}); starting the engine through Windows.`);
+          this.addonProblem = errorMessage(e);
+          this.addon = null;
+          this.state.engine.mode = "autostart";
+        }
+      }
+      if (this.state.engine.mode === "autostart") {
+        this.client = (await connectAutostart(this.files!)).client;
+      }
       const health = await this.client.health();
       const caps = await this.client.capabilities();
       this.setEngine({ status: "running", health, caps, error: null });
@@ -322,13 +367,19 @@ export class PanelApp {
   }
 
   private async restartEngine(): Promise<void> {
-    if (this.addon) this.addon.stop();
+    if (this.addon) {
+      try {
+        this.addon.stop();
+      } catch (e) {
+        log.debug(`stop failed: ${errorMessage(e)}`);
+      }
+    }
     await this.startEngine();
   }
 
   async checkEngine(quiet = false): Promise<void> {
     const e = this.state.engine;
-    if (e.mode === "builtin") {
+    if (e.mode === "builtin" || e.mode === "autostart") {
       if (e.status !== "running") return;
       try {
         this.setEngine({ health: await this.client.health() }, false);
@@ -424,7 +475,7 @@ export class PanelApp {
       `Multimedia & AI Group panel ${VERSION} (${s.engine.mode} engine)`,
       `Host: ${s.host?.name} ${s.host?.version} | UXP ${s.host?.uxpVersion} | ${s.host?.os} | locale ${s.host?.uiLocale}`,
       `Engine: ${s.engine.status} ${s.engine.health?.version ?? ""} ${s.engine.error ?? ""}`,
-      `Engine addon: ${this.addon ? this.safeAddonInfo() : "not loaded"}`,
+      `Engine addon: ${this.addon ? this.safeAddonInfo() : `not used${this.addonProblem ? ` (${this.addonProblem})` : ""}`}`,
       `Origins seen by engine: ${(s.engine.caps?.seenOrigins ?? []).join(", ") || "n/a"}`,
       "Capabilities:",
       ...s.caps.map((c) => `  ${c.status.padEnd(24)} ${c.minVersion.padEnd(5)} ${c.label}`),
@@ -608,6 +659,7 @@ export class PanelApp {
     };
     const body: (HTMLElement | null)[] = [];
     if (e.mode === "builtin") body.push(h("p", { class: "muted small" }, t("engineBuiltIn")));
+    if (e.mode === "autostart") body.push(h("p", { class: "muted small" }, t("engineAutostart")));
     if (e.status === "starting") body.push(h("p", { class: "small" }, t("engineStarting")));
     if (e.status === "offline" || e.status === "error") {
       body.push(h("p", { class: "tone-bad small" }, e.error ?? t("engineOffline")));
@@ -635,7 +687,7 @@ export class PanelApp {
           pill(m.available ? t("yes") : t("no"), m.available ? "ok" : "muted"),
           h("span", { class: "cap-label" }, name)))));
     }
-    const actions = e.mode === "builtin"
+    const actions = e.mode !== "external"
       ? button(t("restartEngine"), () => void this.restartEngine(), { disabled: e.status === "starting" })
       : button(t("retry"), () => void this.checkEngine());
     return card(t("engine"), pill(label[e.status], tone[e.status]), ...body, h("div", { class: "actions" }, actions));

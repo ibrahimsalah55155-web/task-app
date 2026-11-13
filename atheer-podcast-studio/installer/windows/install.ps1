@@ -15,7 +15,8 @@ param(
   [switch]$Yes,      # do not ask (CI / advanced)
   [switch]$Quiet,    # no message boxes (CI)
   [string]$UxpRoot = "",
-  [string]$Ccx = ""
+  [string]$Ccx = "",
+  [switch]$NoAutostart  # do not add the Windows log-on entry (CI)
 )
 $ErrorActionPreference = "Stop"
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -167,6 +168,77 @@ function Direct-Remove {
   return $removed
 }
 
+# ---- engine started by Windows ---------------------------------------------------------------
+# Premiere normally starts the engine through the plugin's native launcher. When it does not (for
+# example a plugin installed without Creative Cloud), the engine runs from engine\start-engine.vbs:
+# at Windows log-on (shortcut below), right after installing, and on request from the panel.
+$StartupLnk = Join-Path ([Environment]::GetFolderPath("Startup")) "Multimedia AI Group Engine.lnk"
+
+function Plugin-Dirs {
+  $roots = @((Join-Path $UxpRoot "Plugins\External"))
+  foreach ($b in @($env:CommonProgramFiles, ${env:CommonProgramFiles(x86)}) | Where-Object { $_ }) {
+    $roots += (Join-Path $b "Adobe\UXP\Plugins\External")
+  }
+  $out = @()
+  foreach ($r in $roots | Select-Object -Unique) {
+    if (Test-Path $r) { $out += @(Get-ChildItem -Path $r -Directory -Filter "${Id}_*" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }) }
+  }
+  return $out
+}
+
+function Stop-Engine {
+  # Any engine running from an installed copy of this plugin (files must not be in use while replacing them).
+  $dirs = @(Plugin-Dirs)
+  $procs = Get-CimInstance Win32_Process -Filter "Name = 'pythonw.exe' OR Name = 'python.exe'" -ErrorAction SilentlyContinue
+  foreach ($p in $procs) {
+    foreach ($d in $dirs) {
+      if ($p.ExecutablePath -and $p.ExecutablePath.StartsWith($d, [StringComparison]::OrdinalIgnoreCase)) {
+        Say "Stopping engine (pid $($p.ProcessId))"
+        Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+      }
+    }
+  }
+  Start-Sleep -Milliseconds 500
+}
+
+function Engine-Answers($tokenFile) {
+  if (-not (Test-Path $tokenFile)) { return 0 }
+  $tok = (Get-Content $tokenFile -Raw).Trim()
+  foreach ($port in 47820..47823) {
+    try {
+      $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri "http://127.0.0.1:$port/api/v1/capabilities" -Headers @{ Authorization = "Bearer $tok" }
+      if ($r.StatusCode -eq 200) { return $port }
+    } catch { }
+  }
+  return 0
+}
+
+function Setup-Autostart($pluginDir) {
+  $vbs = Join-Path $pluginDir "engine\start-engine.vbs"
+  if (-not (Test-Path $vbs)) { return "no-script" }
+  $probe = Join-Path $pluginDir "engine\.write-test"
+  try { Set-Content -Path $probe -Value "x" -ErrorAction Stop; Remove-Item $probe -Force } catch { return "read-only" }
+  if (-not $NoAutostart) {
+    $ws = New-Object -ComObject WScript.Shell
+    $lnk = $ws.CreateShortcut($StartupLnk)
+    $lnk.TargetPath = Join-Path $env:WINDIR "System32\wscript.exe"
+    $lnk.Arguments = '"' + $vbs + '"'
+    $lnk.WorkingDirectory = Split-Path $vbs
+    $lnk.WindowStyle = 7
+    $lnk.Description = "Multimedia & AI Group engine for Premiere Pro"
+    $lnk.Save()
+  }
+  Start-Process -FilePath (Join-Path $env:WINDIR "System32\wscript.exe") -ArgumentList ('"' + $vbs + '"') -WindowStyle Hidden
+  $tokenFile = Join-Path $pluginDir "engine\autostart.token"
+  $deadline = (Get-Date).AddSeconds(90)  # first start: Windows Defender scans the new files
+  while ((Get-Date) -lt $deadline) {
+    Start-Sleep -Seconds 2
+    $port = Engine-Answers $tokenFile
+    if ($port) { Say "Engine running on port $port" "Green"; return "running:$port" }
+  }
+  return "no-answer"
+}
+
 # ---- run ---------------------------------------------------------------------------------------
 try {
   if (Get-Process -Name "Adobe Premiere Pro" -ErrorAction SilentlyContinue) {
@@ -175,12 +247,15 @@ try {
   $upia = if ($Mode -ne "direct") { Find-Upia } else { $null }
 
   if ($Uninstall) {
+    Stop-Engine
+    if (Test-Path $StartupLnk) { Remove-Item $StartupLnk -Force }
     $a = if ($upia) { Official-Remove $upia } else { $false }
     $b = Direct-Remove
     Box ($(if ($a -or $b) { "البلجن اتشال من البريمير." } else { "البلجن مش متسطب أصلاً." })) | Out-Null
     exit 0
   }
 
+  Stop-Engine
   $done = $false
   $how = ""
   if ($upia -and $Mode -ne "direct") {
@@ -203,7 +278,16 @@ try {
   }
 
   if ($done) {
-    $msg = "البلجن اتسطب ✔`n`nافتح البريمير ← Window ← UXP Plugins ← Multimedia & AI Group.`n`nأول مرة ممكن تاخد لحد 30 ثانية علشان الويندوز بيفحص الملفات."
+    $engineState = "no-plugin-dir"
+    $dir = @(Plugin-Dirs) | Select-Object -First 1
+    if ($dir) { $engineState = Setup-Autostart $dir }
+    Say "Engine: $engineState"
+    $msg = "البلجن اتسطب ✔`n`nافتح البريمير ← Window ← UXP Plugins ← Multimedia & AI Group."
+    if ($engineState -like "running:*") {
+      $msg += "`n`nالمحرك شغّال في الخلفية (من غير شباك) وهيشتغل لوحده كل ما تفتح الجهاز."
+    } elseif ($engineState -eq "no-answer") {
+      $msg += "`n`nالمحرك لسه مردّش (ممكن الأنتي فايرس بيفحص الملفات). لو البانل قال إن المحرك مش شغال، اعمل Restart للجهاز."
+    }
     if ($how -eq "direct") {
       $msg += "`n`nلو مظهرش في القايمة: البريمير ← Edit ← Preferences (أو Settings) ← Plugins ← فعّل Enable developer mode، واقفل البريمير وافتحه تاني."
     }

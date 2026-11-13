@@ -98,3 +98,36 @@ def test_missing_token_variable_refuses_to_start(tmp_path):
     out = subprocess.run([sys.executable, "-m", "atheer_companion", "--port", "47914", "--data-dir", str(tmp_path / "d"),
                           "--token-env", "MAG_ENGINE_TOKEN"], cwd=ROOT, env=env, capture_output=True, timeout=30)
     assert out.returncode == 3
+
+
+def test_token_file_and_port_range_start_once(tmp_path):
+    """Windows start-up mode: token comes from a file (created if missing); a second start is a no-op;
+    a busy port is skipped."""
+    import socket
+
+    tok = tmp_path / "engine" / "autostart.token"
+    env = {**os.environ, "MAG_ENGINE_HOME": str(tmp_path / "home")}
+    blocker = socket.socket()
+    blocker.bind(("127.0.0.1", 47921))
+    blocker.listen(1)
+    args = [sys.executable, "-m", "atheer_companion", "--port-range", "47921-47923", "--token-file", str(tok)]
+    proc = subprocess.Popen(args, cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    try:
+        _wait_health(47922, timeout=20)
+        token = tok.read_text().strip()
+        assert len(token) == 48
+        assert _get(47922, "/api/v1/capabilities", token)[0] == 200
+        import urllib.error
+
+        try:
+            _get(47922, "/api/v1/capabilities", "0" * 48)
+            raise AssertionError("wrong token accepted")
+        except urllib.error.HTTPError as e:
+            assert e.code == 401
+        again = subprocess.run(args, cwd=ROOT, env=env, capture_output=True, text=True, timeout=30)
+        assert again.returncode == 0  # already running: exits quietly, no second engine
+        assert tok.read_text().strip() == token  # token kept
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)
+        blocker.close()

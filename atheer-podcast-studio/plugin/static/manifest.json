@@ -1,7 +1,7 @@
 {
   "id": "com.multimediaai.podcaststudio",
   "name": "Multimedia & AI Group",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "main": "index.html",
   "manifestVersion": 5,
   "host": {
@@ -23,6 +23,14 @@
         "ws://127.0.0.1:47823",
         "http://localhost:47820",
         "ws://localhost:47820"
+      ]
+    },
+    "launchProcess": {
+      "schemes": [
+        "https"
+      ],
+      "extensions": [
+        ".vbs"
       ]
     }
   },

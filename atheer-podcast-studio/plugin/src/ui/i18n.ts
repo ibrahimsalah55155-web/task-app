@@ -63,6 +63,7 @@ const en = {
 
   engine: "Engine",
   engineBuiltIn: "Built into the plugin. Starts by itself and stops with Premiere.",
+  engineAutostart: "Started by Windows (Premiere did not run the plugin's launcher). It runs in the background with no window and starts again when you log in.",
   engineStarting: "Starting the engine…",
   engineRunning: "running",
   engineStartingPill: "starting",
@@ -212,6 +213,7 @@ const ar: Record<Key, string> = {
 
   engine: "المحرك",
   engineBuiltIn: "جوه البلجن نفسه. بيشتغل لوحده وبيقفل مع البريمير.",
+  engineAutostart: "شغّال من الويندوز (البريمير مشغّلش المشغّل بتاع البلجن). بيشتغل في الخلفية من غير شباك، وبيبدأ تاني لوحده لما تفتح الجهاز.",
   engineStarting: "المحرك بيشتغل…",
   engineRunning: "شغال",
   engineStartingPill: "بيبدأ",

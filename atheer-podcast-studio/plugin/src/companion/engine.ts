@@ -29,12 +29,65 @@ export function __setAddonForTests(addon: EngineAddon | null): void {
   addonOverride = addon;
 }
 
+const ADDON_FUNCTIONS = ["start", "isRunning", "exitCode", "stop", "info"] as const;
+
+function isEngineAddon(x: unknown): x is EngineAddon {
+  return !!x && (typeof x === "object" || typeof x === "function") &&
+    ADDON_FUNCTIONS.every((f) => typeof (x as Record<string, unknown>)[f] === "function");
+}
+
+/** What came back from require(), for the log when it is not usable. */
+export function describeAddon(x: unknown): string {
+  if (x === null || x === undefined) return String(x);
+  const own = Object.getOwnPropertyNames(x as object);
+  let proto: string[] = [];
+  try {
+    proto = Object.getOwnPropertyNames(Object.getPrototypeOf(x) ?? {});
+  } catch {
+    /* ignore */
+  }
+  return `${typeof x} own=[${own.slice(0, 20).join(", ")}] proto=[${proto.slice(0, 20).join(", ")}]`;
+}
+
+export interface AddonLoad {
+  addon: EngineAddon | null;
+  /** Why the addon cannot be used (null when it loaded fine or is simply not part of this build). */
+  problem: string | null;
+}
+
+/**
+ * Loads the native launcher. Accepts the exports object directly, a promise of it, or the
+ * functions under `default`/`exports`; anything else is reported, not called.
+ */
+export async function loadAddonAsync(): Promise<AddonLoad> {
+  if (addonOverride !== undefined) return { addon: addonOverride, problem: null };
+  let raw: unknown;
+  try {
+    raw = require(ADDON);
+  } catch (e) {
+    log.info(`Built-in engine launcher not loaded: ${errorMessage(e)}`);
+    return { addon: null, problem: `require failed: ${errorMessage(e)}` };
+  }
+  try {
+    if (raw && typeof (raw as { then?: unknown }).then === "function") raw = await (raw as Promise<unknown>);
+  } catch (e) {
+    return { addon: null, problem: `addon promise rejected: ${errorMessage(e)}` };
+  }
+  for (const c of [raw, (raw as { default?: unknown } | null)?.default, (raw as { exports?: unknown } | null)?.exports]) {
+    if (isEngineAddon(c)) return { addon: c, problem: null };
+  }
+  const problem = `Premiere loaded the launcher but did not expose its functions (${describeAddon(raw)}).`;
+  log.warn(problem);
+  return { addon: null, problem };
+}
+
+/** @deprecated synchronous variant kept for tests. */
 export function loadAddon(): EngineAddon | null {
   if (addonOverride !== undefined) return addonOverride;
   try {
-    return require(ADDON) as EngineAddon;
-  } catch (e) {
-    log.debug(`Built-in engine addon not loaded: ${errorMessage(e)}`);
+    const raw = require(ADDON);
+    return isEngineAddon(raw) ? raw : null;
+  } catch {
     return null;
   }
 }

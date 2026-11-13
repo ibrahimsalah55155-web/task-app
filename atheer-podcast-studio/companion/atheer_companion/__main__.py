@@ -86,6 +86,50 @@ def _port_free(host: str, port: int) -> bool:
     return True
 
 
+def _token_from_file(path: Path) -> str:
+    """Read the session token; create one (random, 192 bits) if the file does not exist yet."""
+    import secrets
+
+    if path.is_file():
+        tok = path.read_text(encoding="utf-8").strip()
+        if len(tok) >= 32:
+            return tok
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tok = secrets.token_hex(24)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(tok, encoding="utf-8")
+    os.replace(tmp, path)
+    return tok
+
+
+def _engine_with_token(host: str, port: int, token: str) -> bool:
+    """True if an engine that accepts `token` already answers on `port`."""
+    import http.client
+    import json
+
+    try:
+        c = http.client.HTTPConnection(host, port, timeout=1.5)
+        c.request("GET", "/api/v1/health", headers={"Host": f"{host}:{port}"})
+        r = c.getresponse()
+        body = json.loads(r.read() or b"{}")
+        if r.status != 200 or body.get("service") != "atheer-companion":
+            return False
+        c.request("GET", "/api/v1/capabilities", headers={"Host": f"{host}:{port}", "Authorization": f"Bearer {token}"})
+        r = c.getresponse()
+        r.read()
+        return r.status == 200
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _parse_range(text: str) -> list[int]:
+    a, _, b = text.partition("-")
+    lo, hi = int(a), int(b or a)
+    if not (1024 <= lo <= hi <= 65535 and hi - lo < 50):
+        raise ValueError(f"bad port range {text}")
+    return list(range(lo, hi + 1))
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="mag-engine", description="Multimedia & AI Group - local processing engine")
     p.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"loopback port (default {DEFAULT_PORT})")
@@ -97,6 +141,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--parent-pid", type=int, default=None, help="exit when this process exits (set by the plugin)")
     p.add_argument("--token-env", default=None,
                    help="name of an environment variable holding a session token (set by the plugin; skips pairing)")
+    p.add_argument("--token-file", type=Path, default=None,
+                   help="file holding the session token (created if missing); used when the engine starts with "
+                        "Windows instead of from the plugin")
+    p.add_argument("--port-range", default=None,
+                   help="e.g. 47820-47823: use the first free port; exit quietly if an engine with the same token "
+                        "already runs in the range")
     p.add_argument("--revoke-all", action="store_true", help="forget every paired panel, then exit")
     p.add_argument("--verbose", action="store_true")
     p.add_argument("--version", action="version", version=__version__)
@@ -114,6 +164,20 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Revoked {store.revoke_all_clients()} paired panel(s).")
         return 0
 
+    file_token = _token_from_file(args.token_file) if args.token_file else None
+    if args.port_range:
+        ports = _parse_range(args.port_range)
+        if file_token:
+            for port in ports:
+                if _engine_with_token(config.host, port, file_token):
+                    log.info("An engine for this token already runs on port %s; nothing to do.", port)
+                    return 0
+        free = [port for port in ports if _port_free(config.host, port)]
+        if not free:
+            log.error("No free port in %s.", args.port_range)
+            return 2
+        config.port = free[0]
+
     if not _port_free(config.host, config.port):
         log.error("Port %s is already in use by another program or engine.", config.port)
         return 2
@@ -122,7 +186,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from .app import create_app
 
-    session_token = os.environ.get(args.token_env) if args.token_env else None
+    session_token = os.environ.get(args.token_env) if args.token_env else file_token
     if args.token_env and not session_token:
         log.error("--token-env %s given but the variable is empty", args.token_env)
         return 3

@@ -111,6 +111,9 @@ $Bin = Get-ChildItem -Recurse (Join-Path $Work "ffmpeg") -Filter "ffprobe.exe" |
 Copy-Item (Join-Path $Bin.DirectoryName "ffmpeg.exe"), (Join-Path $Bin.DirectoryName "ffprobe.exe") $FfDir
 Get-ChildItem -Recurse (Join-Path $Work "ffmpeg") -Filter "LICENSE*" | Select-Object -First 1 | Copy-Item -Destination (Join-Path $FfDir "LICENSE.txt")
 
+# ---- 4a. engine start script (used when Premiere does not run the native launcher) ---------
+Copy-Item (Join-Path $PSScriptRoot "engine\start-engine.vbs") (Join-Path $Pkg "engine\start-engine.vbs")
+
 # ---- 4b. offline models -------------------------------------------------------------------
 if ($ModelsDir) {
   $Src = if ([System.IO.Path]::IsPathRooted($ModelsDir)) { $ModelsDir } else { Join-Path $Repo $ModelsDir }
@@ -219,9 +222,16 @@ if (-not $SkipTests) {
   '{"plugins":[{"hostMinVersion":"25.6.0","name":"Other","path":"$localPlugins\\External\\other_1.0.0","pluginId":"other.plugin","status":"enabled","type":"uxp","versionString":"1.0.0"}]}' |
     Set-Content -Path $Info -Encoding UTF8
   foreach ($round in 1, 2) {
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Dl "install.ps1") -Mode direct -Yes -Quiet -UxpRoot $Uxp
+    $InstallLines = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Dl "install.ps1") -Mode direct -Yes -Quiet -NoAutostart -UxpRoot $Uxp
+    $InstallLines | Write-Host
     Must "installer round $round"
+    # The installer starts the engine through Windows (start-engine.vbs) and checks it answers with its token.
+    if (-not ($InstallLines -match "Engine: running:478")) { throw "engine did not start through Windows in round $round" }
   }
+  $tokFile = Join-Path $Uxp ("Plugins\External\com.multimediaai.podcaststudio_$Version\engine\autostart.token")
+  $tok = (Get-Content $tokFile -Raw).Trim()
+  $caps = Invoke-RestMethod -Uri "http://127.0.0.1:47820/api/v1/capabilities" -Headers @{ Authorization = "Bearer $tok" }
+  Write-Host "engine started by Windows answers: $($caps.service) $($caps.version)"
   $j = Get-Content $Info -Raw | ConvertFrom-Json
   $ids = @($j.plugins | ForEach-Object { $_.pluginId })
   Write-Host "registered: $($ids -join ', ')"
@@ -239,14 +249,17 @@ if (-not $SkipTests) {
   Must "uninstall"
   $j = Get-Content $Info -Raw | ConvertFrom-Json
   if (@($j.plugins).Count -ne 1 -or $j.plugins[0].pluginId -ne "other.plugin" -or (Test-Path $dir)) { throw "uninstall did not clean up" }
+  $left = Get-CimInstance Win32_Process -Filter "Name = 'pythonw.exe'" | Where-Object { $_.ExecutablePath -like "*com.multimediaai.podcaststudio*" }
+  if ($left) { throw "engine still running after uninstall" }
   Write-Host "OK: uninstall removed only this plugin"
 
   Say "Testing the installer with no PPRO.json at all (fresh machine)"
   $Uxp2 = Join-Path $Work "uxp-fresh"
-  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Dl "install.ps1") -Yes -Quiet -UxpRoot $Uxp2
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Dl "install.ps1") -Yes -Quiet -NoAutostart -UxpRoot $Uxp2
   Must "fresh install (auto mode)"
   $j = Get-Content (Join-Path $Uxp2 "PluginsInfo\v1\PPRO.json") -Raw | ConvertFrom-Json
   if (@($j.plugins).Count -ne 1) { throw "fresh PPRO.json wrong" }
   Get-Content (Join-Path $Uxp2 "PluginsInfo\v1\PPRO.json") | Write-Host
+  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Dl "install.ps1") -Uninstall -Mode direct -Quiet -UxpRoot $Uxp2
 }
 Get-ChildItem $Dl | ForEach-Object { Write-Host ("  " + $_.Name) }
