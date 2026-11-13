@@ -207,7 +207,7 @@ Say "Preparing the download folder (installer without Creative Cloud)"
 $Dl = Join-Path $Out "MultimediaAIGroup-$Version"
 New-Item -ItemType Directory -Force -Path $Dl | Out-Null
 Move-Item $Ccx $Dl
-Copy-Item (Join-Path $PSScriptRoot "windows\*") $Dl
+Copy-Item (Join-Path $PSScriptRoot "windows\*") $Dl -Exclude ".gitattributes"
 $Ccx = Join-Path $Dl "MultimediaAIGroup-$Version.ccx"
 
 if (-not $SkipTests) {

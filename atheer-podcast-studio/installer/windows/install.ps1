@@ -46,15 +46,19 @@ if (-not $Ccx) {
 # Files downloaded from the internet carry a "blocked" mark; remove it so Windows lets the engine run.
 Unblock-File -Path $Ccx -ErrorAction SilentlyContinue
 
+$ProgressPreference = "SilentlyContinue"
+Add-Type -AssemblyName System.IO.Compression.FileSystem
 $Tmp = Join-Path $env:TEMP ("mag_install_" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
-$Zip = Join-Path $Tmp "package.zip"
-Copy-Item $Ccx $Zip
-$Unpacked = Join-Path $Tmp "plugin"
-Expand-Archive -Path $Zip -DestinationPath $Unpacked
-$ManifestPath = Join-Path $Unpacked "manifest.json"
-if (-not (Test-Path $ManifestPath)) { throw "manifest.json not found in $Ccx" }
-$Manifest = Get-Content $ManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+# Read the manifest straight from the package (fast); the full unpack happens only when needed.
+$zipRead = [System.IO.Compression.ZipFile]::OpenRead($Ccx)
+try {
+  $entry = $zipRead.Entries | Where-Object { $_.FullName -eq "manifest.json" } | Select-Object -First 1
+  if (-not $entry) { throw "manifest.json not found in $Ccx" }
+  $sr = New-Object System.IO.StreamReader($entry.Open(), [System.Text.Encoding]::UTF8)
+  $Manifest = $sr.ReadToEnd() | ConvertFrom-Json
+  $sr.Close()
+} finally { $zipRead.Dispose() }
 $Id = $Manifest.id
 $Version = $Manifest.version
 $Name = $Manifest.name
@@ -119,13 +123,13 @@ function Write-Info($j) {
 }
 
 function Direct-Install {
-  # remove older versions of this plugin
+  # remove older versions of this plugin (also an earlier copy of this version)
   if (Test-Path $PluginsDir) {
     Get-ChildItem -Path $PluginsDir -Directory -Filter "${Id}_*" | ForEach-Object { Remove-Item -Recurse -Force $_.FullName }
   }
   $dest = Join-Path $PluginsDir $Folder
-  New-Item -ItemType Directory -Force -Path $dest | Out-Null
-  Copy-Item -Recurse -Force (Join-Path $Unpacked "*") $dest
+  New-Item -ItemType Directory -Force -Path $PluginsDir | Out-Null
+  [System.IO.Compression.ZipFile]::ExtractToDirectory($Ccx, $dest)
   Get-ChildItem -Path $dest -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
   $j = Read-Info
   $others = @($j.plugins | Where-Object { $_.pluginId -ne $Id })
