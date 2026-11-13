@@ -125,9 +125,22 @@ export class FinishView extends Stage {
       const others = cameras.filter((c) => c.id !== String(this.ref));
       for (let ci = 0; ci < others.length; ci++) {
         const cam = others[ci]!;
-        const clips = await this.masterClip(live.project, cam.path);
-        if (!clips.length) continue;
-        const comp = await ensureLumetri(live.project, clips[0]!);
+        const all = await this.masterClip(live.project, cam.path);
+        // Some items (cut pieces / subclips) have no effects chain in Premiere: use those that do.
+        const usable: { clip: ClipProjectItem; comp: Component }[] = [];
+        for (const c of all) {
+          try {
+            usable.push({ clip: c, comp: await ensureLumetri(live.project, c) });
+          } catch (e) {
+            log.debug(`no Lumetri on a clip of ${cam.name}: ${errorMessage(e)}`);
+          }
+        }
+        if (!usable.length) {
+          this.host.notify("warn", t("colorMissing", { names: cam.name, path: res.luts?.[cam.id] ?? lutDir }));
+          continue;
+        }
+        const clips = usable.map((u) => u.clip);
+        const comp = usable[0]!.comp;
         const missing = KEYS.filter((k) => !lumetriParams(comp)[k]);
         if (missing.length) {
           this.host.notify("warn", t("colorMissing", { names: missing.join(", "), path: res.luts?.[cam.id] ?? lutDir }));
@@ -155,7 +168,7 @@ export class FinishView extends Stage {
           }
         }
         // Same look on every clip of this camera (cut pieces are subclips of the master).
-        for (const c of clips.slice(1)) await setLumetri(live.project, await ensureLumetri(live.project, c), state.values);
+        for (const u of usable.slice(1)) await setLumetri(live.project, u.comp, state.values);
         const after = last ? error(last, target) : before;
         this.lines.push(t(last && good(last, target) ? "colorDone" : "colorPartial",
           { cam: cam.name, before: before.toFixed(1), after: after.toFixed(1) }));
@@ -184,8 +197,12 @@ export class FinishView extends Stage {
       let n = 0;
       for (const v of tl.video.filter((x) => x.pieces.length)) {
         for (const c of await this.masterClip(live.project, v.pieces[0]!.path)) {
-          const comp: Component = await ensureLumetri(live.project, c);
-          await setLumetri(live.project, comp, neutral());
+          try {
+            const comp: Component = await ensureLumetri(live.project, c);
+            await setLumetri(live.project, comp, neutral());
+          } catch (e) {
+            log.debug(`reset skipped a clip: ${errorMessage(e)}`);
+          }
         }
         n++;
       }

@@ -253,6 +253,10 @@ export class FakeTrackItem {
   async getComponentChain() {
     return this.chain;
   }
+  createSetEndAction(t: FakeTickTime) {
+    requireLock("createSetEndAction");
+    return new Action("setEnd", () => (this.end = t.ticksNumber));
+  }
 }
 
 export class FakeTrack {
@@ -399,7 +403,18 @@ export class FakeProject {
     this.deleted.push(seq.name);
     return true;
   }
-  async importFiles(paths: string[], _suppress: boolean, bin: FakeFolder) {
+  /** Simulate Premiere 26.5 behaviour seen on a real machine: items land in the root bin and/or appear late. */
+  importQuirk: { root?: boolean; delayMs?: number } = {};
+  async importFiles(paths: string[], _suppress: boolean, binArg: FakeFolder) {
+    const bin = this.importQuirk.root ? this.root : binArg;
+    if (this.importQuirk.delayMs) {
+      const q = this.importQuirk.delayMs;
+      setTimeout(() => void this.importNow(paths, bin), q);
+      return true;
+    }
+    return this.importNow(paths, bin);
+  }
+  private async importNow(paths: string[], bin: FakeFolder) {
     for (const p of paths) {
       this.imports.push(p);
       const c = new FakeClip(p.split(/[\\/]/).pop()!, p);

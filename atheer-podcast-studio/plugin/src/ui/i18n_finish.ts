@@ -38,6 +38,9 @@ export const finishEn = {
   colorResetDone: "Colour match removed from {n} camera(s).",
   colorNeedCams: "The sequence needs at least two camera tracks.",
   resultsTitle: "Results",
+  needMicTrack: "Turn on at least one microphone track in the list above (tracks with audio clips).",
+  oneAudioTrack: "This sequence has only one audio track, so guest and host cannot be told apart by microphone. Switched to “One shared mic”: press Separate speakers.",
+  noAudioClips: "No audio clips found on this sequence. Open the synced sequence (not a nested/multicam one) and try again.",
 
   mcTitle: "Premiere Multi-Camera",
   mcHelp: "Puts the synced sequence inside a new sequence. Then right-click its clip › Multi-Camera › Enable, and switch cameras live in the Multi-Camera view of the Program monitor.",
@@ -137,6 +140,9 @@ export const finishAr: Record<keyof typeof finishEn, string> = {
   colorResetDone: "اتشال توحيد الألوان من {n} كاميرا.",
   colorNeedCams: "السيكوانس محتاجة تراكين كاميرا على الأقل.",
   resultsTitle: "النتيجة",
+  needMicTrack: "فعّل تراك مايك واحد على الأقل من القايمة اللي فوق (التراكات اللي فيها كليبات صوت).",
+  oneAudioTrack: "السيكوانس دي فيها تراك صوت واحد بس، فمينفعش نفرّق الضيف من المذيع بالمايك. اتحوّلت لـ «مايك واحد مشترك»: دوس «افصل المتكلمين».",
+  noAudioClips: "مفيش كليبات صوت في السيكوانس دي. افتح السيكوانس المتزامنة (مش سيكوانس متداخلة/ملتي كام) وجرّب تاني.",
 
   mcTitle: "ملتي كام بريمير",
   mcHelp: "بيحط السيكوانس المتزامنة جوه سيكوانس جديدة. بعدها كليك يمين على الكليب › Multi-Camera › Enable، وبدّل بين الكاميرات لايف من عرض Multi-Camera في شاشة البروجرام.",

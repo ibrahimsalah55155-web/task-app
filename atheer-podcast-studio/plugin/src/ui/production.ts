@@ -189,7 +189,7 @@ export class SilenceView extends Stage {
     void this.run(async () => {
       const tl = await this.ensureTimeline();
       const tracks = tl.audio.filter((x) => this.tracks!.includes(x.index) && x.pieces.length).map((x) => ({ name: x.name, pieces: x.pieces }));
-      if (!tracks.length) throw new Error(t("tracksToUse"));
+      if (!tracks.length) throw new Error(tl.audio.some((x) => x.pieces.length) ? t("needMicTrack") : t("noAudioClips"));
       const res = await this.host.client().runJob<{ candidates: SilenceCandidate[]; stats: { removable: number; count: number; newDuration: number } }>(
         "silence", { tracks, duration: tl.duration, params: { preset: this.preset, ...this.params, preserveLaughter: this.laughter, preserveBreath: this.breath } }, this.onJob);
       this.cands = res.candidates;
@@ -347,7 +347,14 @@ export class DirectorView extends Stage {
       } else {
         const g = tl.audio.find((x) => x.index === m.guestMic);
         const hh = tl.audio.find((x) => x.index === m.hostMic);
-        if (!g || !hh) throw new Error(`${t("guestMicTrack")} / ${t("hostMicTrack")}`);
+        if (!g || !hh || g === hh) {
+          if (tl.audio.filter((x) => x.pieces.length).length <= 1) {
+            this.micMode = "one";
+            this.sharedMic = tl.audio.find((x) => x.pieces.length)?.index ?? null;
+            throw new Error(tl.audio.some((x) => x.pieces.length) ? t("oneAudioTrack") : t("noAudioClips"));
+          }
+          throw new Error(`${t("guestMicTrack")} / ${t("hostMicTrack")}`);
+        }
         body = { guest: { name: g.name, pieces: g.pieces }, host: { name: hh.name, pieces: hh.pieces }, duration: tl.duration, params: this.params };
       }
       const res = await this.host.client().runJob<{ shots: Shot[] }>("director", body, this.onJob);

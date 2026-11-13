@@ -15,6 +15,7 @@ import { logger } from "../core/log.ts";
 import { ppro } from "./api.ts";
 import { CHILD_BINS, ROOT_BIN, ensureProjectBins, findChildBin } from "./edits.ts";
 import { secondsToTicks } from "./timeline.ts";
+import { importAndFind } from "./importing.ts";
 import { finishTransaction } from "./transaction.ts";
 
 const log = logger("build");
@@ -33,26 +34,50 @@ export interface BuildPlan {
   trackNames: { wide: string; host: string; guest: string; guestMic: string; hostMic: string; extra: string; camAudio: string };
 }
 
-/** Pure: track index for every item. */
+type CamRole = "wide_cam" | "host_cam" | "guest_cam";
+type NameKey = "wide" | "host" | "guest" | "guestMic" | "hostMic" | "extra" | "camAudio";
+export interface TrackName { index: number; key: NameKey; n?: number; cam?: "wide" | "host" | "guest" }
+
+const CAM_KEY: Record<CamRole, "wide" | "host" | "guest"> = { wide_cam: "wide", host_cam: "host", guest_cam: "guest" };
+
+/**
+ * Pure: track index for every item, with no empty tracks in between (a shoot without a
+ * Wide Camera or without separate mics must not leave gaps: Premiere refuses an insert
+ * on a track index that does not exist yet).
+ *   video: Wide, Host, Guest (only those present)
+ *   audio: Guest Mic, Host Mic, extras, then each camera's own audio (only those present)
+ */
 export function layout(items: BuildItem[]): { video: Map<BuildItem, number>; audio: Map<BuildItem, number>;
-  camAudioTracks: number[]; extraTracks: number[]; } {
-  const vIdx: Record<string, number> = { wide_cam: 0, host_cam: 1, guest_cam: 2 };
+  camAudioTracks: number[]; extraTracks: number[]; vNames: TrackName[]; aNames: TrackName[] } {
+  const present = (r: Role) => items.some((i) => i.role === r);
+  const cams = (["wide_cam", "host_cam", "guest_cam"] as CamRole[]).filter(present);
+  const extras = [...new Set(items.filter((i) => i.role === "extra").map((i) => i.path))];
+  const vNames: TrackName[] = cams.map((r, k) => ({ index: k, key: CAM_KEY[r] }));
+  const aNames: TrackName[] = [];
+  if (present("guest_mic")) aNames.push({ index: aNames.length, key: "guestMic" });
+  if (present("host_mic")) aNames.push({ index: aNames.length, key: "hostMic" });
+  const extraTracks = extras.map((_, k) => {
+    aNames.push({ index: aNames.length, key: "extra", n: k + 1 });
+    return aNames.length - 1;
+  });
+  const camAudioTracks = cams.map((r, k) => {
+    aNames.push({ index: aNames.length, key: "camAudio", n: k + 1, cam: CAM_KEY[r] });
+    return aNames.length - 1;
+  });
   const video = new Map<BuildItem, number>();
   const audio = new Map<BuildItem, number>();
-  const extras = [...new Set(items.filter((i) => i.role === "extra").map((i) => i.path))];
-  const cams = ["wide_cam", "host_cam", "guest_cam"].filter((r) => items.some((i) => i.role === r));
-  const extraTracks = extras.map((_, k) => 2 + k);
-  const camAudioBase = 2 + extras.length;
-  const camAudioTracks = cams.map((_, k) => camAudioBase + k);
+  const guestMic = aNames.find((x) => x.key === "guestMic")?.index;
+  const hostMic = aNames.find((x) => x.key === "hostMic")?.index;
   for (const it of items) {
-    if (it.role in vIdx) {
-      video.set(it, vIdx[it.role]!);
-      audio.set(it, camAudioBase + cams.indexOf(it.role));
-    } else if (it.role === "guest_mic") audio.set(it, 0);
-    else if (it.role === "host_mic") audio.set(it, 1);
-    else audio.set(it, 2 + extras.indexOf(it.path));
+    if (it.role.endsWith("_cam")) {
+      const k = cams.indexOf(it.role as CamRole);
+      video.set(it, k);
+      audio.set(it, camAudioTracks[k]!);
+    } else if (it.role === "guest_mic") audio.set(it, guestMic!);
+    else if (it.role === "host_mic") audio.set(it, hostMic!);
+    else audio.set(it, extraTracks[extras.indexOf(it.path)]!);
   }
-  return { video, audio, camAudioTracks, extraTracks };
+  return { video, audio, camAudioTracks, extraTracks, vNames, aNames };
 }
 
 /**
@@ -69,33 +94,10 @@ export function insertionOrder(items: BuildItem[]): BuildItem[] {
     || a.seqStart - b.seqStart);
 }
 
-const samePath = (a: string, b: string) => a.replace(/\\/g, "/").toLowerCase() === b.replace(/\\/g, "/").toLowerCase();
 
 async function importInto(project: Project, bin: FolderItem, paths: string[]): Promise<Map<string, ClipProjectItem>> {
-  const P = ppro();
-  const found = new Map<string, ClipProjectItem>();
-  const scan = async () => {
-    for (const item of await bin.getItems()) {
-      try {
-        const c = P.ClipProjectItem.cast(item);
-        const p = c ? await c.getMediaFilePath() : "";
-        const want = paths.find((x) => samePath(x, p));
-        if (c && want) found.set(want, c);
-      } catch {
-        /* not a clip */
-      }
-    }
-  };
-  await scan();
-  const missing = paths.filter((p) => !found.has(p));
-  if (missing.length) {
-    const ok = await project.importFiles(missing, true, bin as unknown as ProjectItem, false);
-    if (!ok) throw new Error("Premiere could not import the files.");
-    await scan();
-  }
-  const still = paths.filter((p) => !found.has(p));
-  if (still.length) throw new Error(`Not found after import: ${still.join(", ")}`);
-  return found;
+  if (!paths.length) return new Map();
+  return await importAndFind(project, paths, bin);
 }
 
 export async function buildSyncedSequence(project: Project, plan: BuildPlan): Promise<Sequence> {
@@ -123,27 +125,32 @@ export async function buildSyncedSequence(project: Project, plan: BuildPlan): Pr
   if (!seq) throw new Error("The new sequence was not created.");
   await clearSequence(project, seq);
 
-  const { video, audio, camAudioTracks, extraTracks } = layout(plan.items);
+  const { video, audio, camAudioTracks, vNames, aNames } = layout(plan.items);
   const editor = P.SequenceEditor.getEditor(seq);
   const undo = `MAG: Build ${plan.name}`;
-  const ordered = insertionOrder(plan.items);
-  let committed = false;
-  project.lockedAccess(() => {
-    const actions = ordered.map((it) => editor.createInsertProjectItemAction(
-      clipOf(it) as unknown as ProjectItem,
-      P.TickTime.createWithTicks(String(secondsToTicks(it.seqStart))),
-      video.get(it) ?? 0,
-      audio.get(it) ?? 0,
-      true,
-    ));
-    committed = project.executeTransaction((compound) => {
-      for (const a of actions) compound.addAction(a);
-    }, undo);
-  });
-  finishTransaction(committed, undo, ordered.length);
+  // One insert per transaction: an insert that creates a track must see the tracks the
+  // previous inserts created (Premiere validates the index when the action is made).
+  for (const it of insertionOrder(plan.items)) {
+    let committed = false;
+    project.lockedAccess(() => {
+      const action = editor.createInsertProjectItemAction(
+        clipOf(it) as unknown as ProjectItem,
+        P.TickTime.createWithTicks(String(secondsToTicks(Math.max(0, it.seqStart)))),
+        video.get(it) ?? 0,
+        audio.get(it) ?? 0,
+        true,
+      );
+      committed = project.executeTransaction((compound) => {
+        compound.addAction(action);
+      }, undo);
+    });
+    finishTransaction(committed, undo, 1);
+  }
 
-  await nameTracks(project, seq, plan, camAudioTracks, extraTracks);
-  for (const idx of camAudioTracks) {
+  await nameTracks(project, seq, plan, vNames, aNames);
+  // Camera audio is muted only when separate mics exist; otherwise it is the only sound.
+  const hasMics = plan.items.some((i) => i.role === "guest_mic" || i.role === "host_mic" || i.role === "extra");
+  for (const idx of hasMics ? camAudioTracks : []) {
     try {
       await (await seq.getAudioTrack(idx)).setMute(true);
     } catch (e) {
@@ -177,16 +184,17 @@ async function clearSequence(project: Project, seq: Sequence): Promise<void> {
   finishTransaction(committed, undo, items.length);
 }
 
-async function nameTracks(project: Project, seq: Sequence, plan: BuildPlan, camAudio: number[], extra: number[]): Promise<void> {
+async function nameTracks(project: Project, seq: Sequence, plan: BuildPlan, vNames: TrackName[], aNames: TrackName[]): Promise<void> {
   const n = plan.trackNames;
-  const vNames: [number, string][] = [[0, n.wide], [1, n.host], [2, n.guest]];
-  const aNames: [number, string][] = [[0, n.guestMic], [1, n.hostMic], ...extra.map((i, k) => [i, `${n.extra} ${k + 1}`] as [number, string]),
-    ...camAudio.map((i, k) => [i, `${n.camAudio} ${k + 1}`] as [number, string])];
+  const label = (t: TrackName) => (t.key === "extra" ? `${n.extra} ${t.n}`
+    : t.key === "camAudio" ? `${n[t.cam!]} · ${n.camAudio}` : n[t.key]);
+  const vList: [number, string][] = vNames.map((t) => [t.index, label(t)]);
+  const aList: [number, string][] = aNames.map((t) => [t.index, label(t)]);
   const vCount = await seq.getVideoTrackCount();
   const aCount = await seq.getAudioTrackCount();
   const tracks: { track: { createSetNameAction?: (s: string) => unknown }; name: string }[] = [];
-  for (const [i, name] of vNames) if (i < vCount) tracks.push({ track: await seq.getVideoTrack(i), name });
-  for (const [i, name] of aNames) if (i < aCount) tracks.push({ track: await seq.getAudioTrack(i), name });
+  for (const [i, name] of vList) if (i < vCount) tracks.push({ track: await seq.getVideoTrack(i), name });
+  for (const [i, name] of aList) if (i < aCount) tracks.push({ track: await seq.getAudioTrack(i), name });
   if (!tracks.every((t) => typeof t.track.createSetNameAction === "function")) {
     log.warn("Track renaming needs Premiere 26.3+; tracks keep default names");
     return;

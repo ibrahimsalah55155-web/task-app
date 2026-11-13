@@ -66,3 +66,16 @@ test("editing text relinks the placed graphic to the new render", async () => {
   await relinkGraphic(project as never, "/g/old.mov", "/g/new.mov");
   assert.equal(seq.video[3]!.items[0]!.clip!.relinkedTo, "/g/new.mov");
 });
+
+test("graphics and caption stills still go on the timeline when Premiere imports late and into the wrong bin", async () => {
+  const { placeStills } = await import("../src/ppro/stills.ts");
+  project.importQuirk = { root: true, delayMs: 300 };
+  const r = await insertGraphicAtPlayhead(project as never, seq as never, "C:\\Proj\\MAG Graphics\\MAG_title_y.mov", 6);
+  assert.equal(r.trackIndex, 3);
+  const app = project.root.items.find((i) => i.name === ROOT_BIN) as FakeFolder;
+  const gfx = app.items.find((i) => i.name === GRAPHICS_BIN) as FakeFolder;
+  assert.ok(gfx.items.some((i) => i.name === "MAG_title_y.mov"), "moved into the Graphics bin");
+  const stills = [0, 1, 2].map((k) => ({ path: `C:\\Proj\\MAG Captions\\EP\\cap_${k}.png`, start: 40 + k * 2, end: 41.5 + k * 2 }));
+  const placed = await placeStills(project as never, seq as never, stills, "EP podcast");
+  assert.equal(placed.count, 3);
+});

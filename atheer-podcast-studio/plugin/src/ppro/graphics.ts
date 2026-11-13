@@ -13,6 +13,7 @@ import { logger } from "../core/log.ts";
 import { parseTicks } from "../core/time.ts";
 import { ppro } from "./api.ts";
 import { ROOT_BIN, ensureProjectBins, findChildBin } from "./edits.ts";
+import { importAndFind } from "./importing.ts";
 import { finishTransaction } from "./transaction.ts";
 
 const log = logger("graphics");
@@ -62,11 +63,8 @@ export async function importGraphic(project: Project, path: string): Promise<Cli
   const bin = await graphicsBin(project);
   const existing = await findClipByPath(bin, path);
   if (existing) return existing;
-  const ok = await project.importFiles([path], true, bin as unknown as ProjectItem, false);
-  if (!ok) throw new Error(`Premiere could not import ${path}`);
-  const clip = await findClipByPath(bin, path);
-  if (!clip) throw new Error("The imported graphic was not found in the Graphics bin.");
-  return clip;
+  const found = await importAndFind(project, [path], bin);
+  return found.get(path)!;
 }
 
 export interface Placement {

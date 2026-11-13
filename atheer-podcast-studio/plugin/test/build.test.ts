@@ -41,7 +41,7 @@ test("build creates a synced, named sequence with muted camera audio", async () 
   const seq = await buildSyncedSequence(project as never, { name: "PODCAST_01_SYNC", items, trackNames: names }) as unknown as FakeSequence;
   assert.deepEqual(seq.video.map((t) => t.name), ["Wide Camera", "Host Camera", "Guest Camera"]);
   assert.deepEqual(seq.audio.map((t) => t.name),
-    ["Guest Mic", "Host Mic", "Extra 1", "Camera audio 1", "Camera audio 2", "Camera audio 3"]);
+    ["Guest Mic", "Host Mic", "Extra 1", "Wide Camera · Camera audio", "Host Camera · Camera audio", "Guest Camera · Camera audio"]);
   const start = (tracks: typeof seq.video, i: number) => tracks[i]!.items.map((x) => x.start / TPS);
   assert.deepEqual(start(seq.video, 0), [3.04]);
   assert.deepEqual(start(seq.video, 2), [1, 1800]);
@@ -51,4 +51,21 @@ test("build creates a synced, named sequence with muted camera audio", async () 
   // the sequence was emptied before building: no leftover clip from createSequenceFromMedia at 0 on V1
   assert.equal(seq.video[0]!.items.length, 1);
   assert.equal(project.opened, seq);
+});
+
+test("cameras only (no Wide, no separate mics): no empty tracks, camera audio audible and named per camera", async () => {
+  const only: BuildItem[] = [
+    { path: "D:/Shoot/Robert.mp4", role: "guest_cam", seqStart: 0 },
+    { path: "D:/Shoot/Iman.mp4", role: "guest_cam", seqStart: 0.4 },
+    { path: "D:/Shoot/MrBeast.mp4", role: "host_cam", seqStart: 1.2 },
+  ];
+  for (const it of only) project.mediaLength[it.path] = TPS * 60;
+  const l = layout(only);
+  assert.deepEqual(only.map((i) => l.video.get(i)), [1, 1, 0]);
+  assert.deepEqual(only.map((i) => l.audio.get(i)), [1, 1, 0]);
+  const seq = await buildSyncedSequence(project as never, { name: "PODCAST_02_SYNC", items: only, trackNames: names }) as unknown as FakeSequence;
+  assert.deepEqual(seq.video.map((t) => t.name), ["Host Camera", "Guest Camera"]);
+  assert.deepEqual(seq.audio.map((t) => t.name), ["Host Camera · Camera audio", "Guest Camera · Camera audio"]);
+  assert.deepEqual(seq.audio.map((t) => t.muted), [false, false]);
+  assert.equal(seq.video[1]!.items.length, 2);
 });

@@ -5,6 +5,7 @@ import type { Prefs } from "../core/prefs.ts";
 import { getActiveProject, type ProjectSnapshot } from "../ppro/project.ts";
 import { guessRoles, readTimeline, type TimelineSpec } from "../ppro/timeline.ts";
 import { h, type Tone } from "./dom.ts";
+import { t } from "./i18n.ts";
 
 declare const require: (id: string) => unknown;
 
@@ -127,7 +128,7 @@ export async function transcribeActive(host: PhaseHost, model: string, language:
   const chosen = (pick.length ? tl.audio.filter((t) => pick.includes(t.index)) : mics).map((t) => ({
     name: t.name, role: t.index === roles.guestMic ? "guest" : t.index === roles.hostMic ? "host" : "other", pieces: t.pieces,
   }));
-  if (!chosen.length) throw new Error("The sequence has no audio.");
+  if (!chosen.length) throw new Error(t("noAudioClips"));
   const guid = live.seq.guid.toString();
   const sp = host.speakers.get(guid);
   const spRoles = sp ? Object.fromEntries(Object.entries(sp.roles).filter(([, r]) => r)) : {};

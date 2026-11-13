@@ -306,8 +306,10 @@ export class ReelsView extends Stage {
       const g = this.guid();
       const list = g ? this.reels.get(g) : null;
       if (!live || !list) return;
-      const source = live.seq;
-      const project = live.project;
+      // Premiere invalidates sequence objects after another sequence is opened (each reel opens),
+      // so the source is looked up again, by its id, for every reel.
+      const sourceGuid = live.seq.guid.toString();
+      let project = live.project;
       const existing = new Set((await project.getSequences()).map((s) => s.name));
       const total = this.host.snapshot()?.activeSequence?.durationSeconds ?? 0;
       const chosen = list.filter((_, i) => this.approved.has(i)).sort((x, y) => x.start - y.start);
@@ -322,9 +324,19 @@ export class ReelsView extends Stage {
         this.message = name;
         const remove = [{ start: 0n, end: secondsToTicks(r.start) }, { start: secondsToTicks(Math.min(r.end, total)), end: secondsToTicks(total + 1) }]
           .filter((x) => x.end > x.start);
-        const report = await buildCutSequence(project, source, { remove, newName: name,
-          onProgress: (_s, f) => { this.progress = (made + f * 0.7) / chosen.length; this.host.rerender(); } });
-        const reel = (await project.getSequences()).find((s) => s.name === name) ?? (await project.getActiveSequence());
+        let report;
+        let reel: Sequence | undefined;
+        try {
+          project = (await getActiveProject()) ?? project;
+          const source = (await project.getSequences()).find((s) => s.guid.toString() === sourceGuid);
+          if (!source) throw new Error("The source sequence is no longer in the project.");
+          report = await buildCutSequence(project, source, { remove, newName: name,
+            onProgress: (_s, f) => { this.progress = (made + f * 0.7) / chosen.length; this.host.rerender(); } });
+          reel = (await project.getSequences()).find((s) => s.name === name) ?? (await project.getActiveSequence()) ?? undefined;
+        } catch (e) {
+          issues.push(`${name}: ${errorMessage(e)}`);
+          continue;
+        }
         if (!reel) continue;
         if (this.aspect !== "16:9") {
           try {

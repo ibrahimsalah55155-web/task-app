@@ -3,13 +3,14 @@
  * put them on one free track above everything, each at its exact start, then
  * trim/extend each to its exact end (stills can be any length).
  */
-import type { ClipProjectItem, FolderItem, Project, ProjectItem, Sequence, VideoClipTrackItem } from "@adobe/premierepro";
+import type { FolderItem, Project, ProjectItem, Sequence, VideoClipTrackItem } from "@adobe/premierepro";
 import { logger } from "../core/log.ts";
 import { parseTicks } from "../core/time.ts";
 import { ppro } from "./api.ts";
 import { CHILD_BINS, ROOT_BIN, ensureProjectBins, findChildBin } from "./edits.ts";
 import { chooseTrack, type Interval } from "./graphics.ts";
 import { secondsToTicks } from "./timeline.ts";
+import { importAndFind } from "./importing.ts";
 import { finishTransaction } from "./transaction.ts";
 
 const log = logger("stills");
@@ -20,7 +21,6 @@ export interface TimedStill {
   end: number;
 }
 
-const samePath = (a: string, b: string) => a.replace(/\\/g, "/").toLowerCase() === b.replace(/\\/g, "/").toLowerCase();
 
 async function subBin(project: Project, parentName: string, name: string): Promise<FolderItem> {
   await ensureProjectBins(project);
@@ -49,21 +49,7 @@ export async function placeStills(project: Project, seq: Sequence, stills: Timed
   const P = ppro();
   if (!stills.length) throw new Error("Nothing to place.");
   const bin = await subBin(project, CHILD_BINS[4], binName);
-  const ok = await project.importFiles(stills.map((s) => s.path), true, bin as unknown as ProjectItem, false);
-  if (!ok) throw new Error("Premiere could not import the caption images.");
-  const clips = new Map<string, ClipProjectItem>();
-  for (const item of await bin.getItems()) {
-    try {
-      const c = P.ClipProjectItem.cast(item);
-      const p = c ? await c.getMediaFilePath() : "";
-      const s = stills.find((x) => samePath(x.path, p));
-      if (c && s) clips.set(s.path, c);
-    } catch {
-      /* not a clip */
-    }
-  }
-  const missing = stills.filter((s) => !clips.has(s.path));
-  if (missing.length) throw new Error(`${missing.length} caption image(s) were not imported.`);
+  const clips = await importAndFind(project, stills.map((s) => s.path), bin);
 
   const sorted = [...stills].sort((a, b) => a.start - b.start);
   const range = { start: secondsToTicks(sorted[0]!.start), end: secondsToTicks(Math.max(...sorted.map((s) => s.end))) };
