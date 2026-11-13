@@ -89,11 +89,18 @@ python -m pip install --no-compile --target (Join-Path $Py "Lib\site-packages") 
 Say "Adding FFmpeg (LGPL build from BtbN/FFmpeg-Builds)"
 $Headers = @{ "User-Agent" = "mag-build" }
 if ($env:GITHUB_TOKEN) { $Headers["Authorization"] = "Bearer $env:GITHUB_TOKEN" }
-$Rel = Invoke-RestMethod -Headers $Headers "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest"
-$Asset = $Rel.assets | Where-Object { $_.name -match '^ffmpeg-n(\d+)\.(\d+)-latest-win64-lgpl-\d+\.\d+\.zip$' } |
-  Sort-Object { [version]("{0}.{1}" -f ($_.name -replace '^ffmpeg-n(\d+)\.(\d+).*$', '$1'), ($_.name -replace '^ffmpeg-n(\d+)\.(\d+).*$', '$2')) } -Descending |
-  Select-Object -First 1
-if (-not $Asset) { throw "No win64 LGPL FFmpeg build found in the latest BtbN release" }
+# BtbN rebuilds its releases daily; the newest one can be briefly incomplete, so look at the
+# few most recent releases and take the first that has the LGPL win64 build and its checksums.
+$Rel = $null; $Asset = $null
+$Releases = Invoke-RestMethod -Headers $Headers "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases?per_page=8"
+foreach ($R in $Releases) {
+  $Cand = $R.assets | Where-Object { $_.name -match '^ffmpeg-n(\d+)\.(\d+)-latest-win64-lgpl-\d+\.\d+\.zip$' } |
+    Sort-Object { [version]("{0}.{1}" -f ($_.name -replace '^ffmpeg-n(\d+)\.(\d+).*$', '$1'), ($_.name -replace '^ffmpeg-n(\d+)\.(\d+).*$', '$2')) } -Descending |
+    Select-Object -First 1
+  if ($Cand -and ($R.assets | Where-Object name -eq "checksums.sha256")) { $Rel = $R; $Asset = $Cand; break }
+}
+if (-not $Asset) { throw "No win64 LGPL FFmpeg build found in the recent BtbN releases" }
+Write-Host "FFmpeg from release $($Rel.tag_name)"
 $FfZip = Join-Path $Work $Asset.name
 Invoke-WebRequest -Headers $Headers $Asset.browser_download_url -OutFile $FfZip
 $SumsFile = Join-Path $Work "checksums.sha256"
