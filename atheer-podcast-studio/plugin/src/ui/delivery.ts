@@ -6,12 +6,13 @@ import { ppro } from "../ppro/api.ts";
 import { buildCutSequence, readLiveItems } from "../ppro/cutengine.ts";
 import { getActiveProject } from "../ppro/project.ts";
 import { ASPECTS, type ReframeTarget, exportSequences, reframe, setFrameSize } from "../ppro/reframe.ts";
+import { srtToCaptionTrack } from "../ppro/finishing.ts";
 import { placeStills } from "../ppro/stills.ts";
 import { secondsToTicks } from "../ppro/timeline.ts";
 import { button, card, h, pill, progress } from "./dom.ts";
 import { type Key, getLang, t } from "./i18n.ts";
-import { type PhaseHost, allWords, choice, fmtTime, joinPath, liveSequence, numField, pickFile, pickFolder, projectDir, toggle,
-  transcribeActive } from "./kit.ts";
+import { type PhaseHost, allWords, choice, fmtTime, joinPath, lines, liveSequence, numField, parseRules, pickFile, pickFolder,
+  projectDir, toggle, transcribeActive } from "./kit.ts";
 
 const log = logger("delivery");
 
@@ -70,7 +71,61 @@ export class CaptionsView extends Stage {
   private language: "ar" | "en" | "auto" = "ar";
   private maxChars: number | null = null;
   private captions = new Map<string, Caption[]>();
+  private translations = new Map<string, { lang: string; captions: Caption[] }>();
+  private showing: "orig" | "tr" = "orig";
+  private trTarget: "en" | "ar" = "en";
   private style = "podcast";
+  private glossaryText: string | null = null;
+  private rulesText: string | null = null;
+  private wordsOpen = false;
+
+  /** Captions currently shown/edited/exported: original or the translation. */
+  private current(): Caption[] | undefined {
+    const g = this.guid();
+    if (!g) return undefined;
+    if (this.showing === "tr") return this.translations.get(g)?.captions;
+    return this.captions.get(g);
+  }
+
+  private saveWords(): void {
+    if (this.glossaryText !== null) this.host.prefs.glossary = lines(this.glossaryText);
+    if (this.rulesText !== null) this.host.prefs.rules = parseRules(this.rulesText);
+    this.host.savePrefs();
+    this.host.notify("ok", t("wordsSaved"));
+  }
+
+  private translate(): void {
+    void this.run(async () => {
+      const g = this.guid();
+      const caps = g ? this.captions.get(g) : null;
+      if (!g || !caps) return;
+      const info = await this.host.client().analysisInfo();
+      const src = this.trTarget === "en" ? "ar" : "en";
+      if (info.translation && !info.translation.includes(`${src}-${this.trTarget}`)) throw new Error(t("translateMissing"));
+      const res = await this.host.client().runJob<{ captions: Caption[] }>("translate",
+        { captions: caps.map((c) => ({ ...c })), source: src, target: this.trTarget },
+        (j) => { this.progress = j.progress; this.message = j.message; this.host.rerender(); });
+      const out = res.captions.map((c) => ({ ...c, words: c.words ?? [], lowConfidence: c.lowConfidence ?? [] }));
+      this.translations.set(g, { lang: this.trTarget, captions: out });
+      this.showing = "tr";
+      this.host.notify("ok", t("translated", { n: out.length, lang: t(`tr_${this.trTarget}` as Key) }));
+    });
+  }
+
+  private native(): void {
+    void this.run(async () => {
+      const caps = this.current();
+      const dir = projectDir(this.host.snapshot());
+      const seq = this.host.snapshot()?.activeSequence;
+      const live = await liveSequence();
+      if (!caps || !dir || !seq || !live) return;
+      const suffix = this.showing === "tr" ? `_${this.translations.get(this.guid()!)?.lang ?? "tr"}` : "";
+      const path = await this.host.client().writeSrt(caps, joinPath(dir, "MAG Captions", `${seq.name}${suffix}_${Date.now().toString(36)}.srt`));
+      const r = await srtToCaptionTrack(live.project, live.seq, path);
+      this.host.notify(r.onTimeline ? "ok" : "warn", r.onTimeline ? t("nativeDone") : r.inBin ? t("nativeInBin") : t("srtSaved", { path }));
+      await this.host.refresh();
+    });
+  }
 
   private defaultMax(): number {
     const s = this.host.snapshot()?.activeSequence;
@@ -82,7 +137,11 @@ export class CaptionsView extends Stage {
       const { guid, transcript } = await transcribeActive(this.host, this.model, this.language === "auto" ? null : this.language,
         (f, m) => { this.progress = f; this.message = m; this.host.rerender(); });
       this.captions.set(guid, await this.host.client().buildCaptions(allWords(transcript), this.maxChars ?? this.defaultMax()));
-      this.host.notify("ok", t("transcriptReady", { n: allWords(transcript).length, lang: transcript.language }));
+      this.translations.delete(guid);
+      this.showing = "orig";
+      const fixed = (transcript as { corrected?: number }).corrected ?? 0;
+      this.host.notify("ok", t("transcriptReady", { n: allWords(transcript).length, lang: transcript.language })
+        + (fixed ? ` ${t("corrected", { n: fixed })}` : ""));
     });
   }
 
@@ -91,26 +150,40 @@ export class CaptionsView extends Stage {
       const g = this.guid();
       const tr = g ? this.host.transcripts.get(g) : null;
       if (!g || !tr) return;
-      this.captions.set(g, await this.host.client().buildCaptions(allWords(tr), this.maxChars ?? this.defaultMax()));
+      // Re-apply the saved corrections to the words, then rebuild.
+      const words = allWords(tr).map((w) => ({ ...w }));
+      let fixed = 0;
+      for (const [a, b] of this.host.prefs.rules) {
+        for (const w of words) {
+          const bare = w.word.replace(/[^\p{L}\p{N}]+$/u, "");
+          if (bare === a) {
+            w.word = b + w.word.slice(bare.length);
+            fixed++;
+          }
+        }
+      }
+      this.captions.set(g, await this.host.client().buildCaptions(words, this.maxChars ?? this.defaultMax()));
+      this.translations.delete(g);
+      this.showing = "orig";
+      if (fixed) this.host.notify("ok", t("corrected", { n: fixed }));
     });
   }
 
   private srt(): void {
     void this.run(async () => {
-      const g = this.guid();
-      const caps = g ? this.captions.get(g) : null;
+      const caps = this.current();
       const dir = projectDir(this.host.snapshot());
       const seq = this.host.snapshot()?.activeSequence;
       if (!caps || !dir || !seq) return;
-      const path = await this.host.client().writeSrt(caps, joinPath(dir, "MAG Captions", `${seq.name}.srt`));
+      const suffix = this.showing === "tr" ? `_${this.translations.get(this.guid()!)?.lang ?? "tr"}` : "";
+      const path = await this.host.client().writeSrt(caps, joinPath(dir, "MAG Captions", `${seq.name}${suffix}.srt`));
       this.host.notify("ok", t("srtSaved", { path }));
     });
   }
 
   private place(): void {
     void this.run(async () => {
-      const g = this.guid();
-      const caps = g ? this.captions.get(g) : null;
+      const caps = this.current();
       const snap = this.host.snapshot();
       const seq = snap?.activeSequence;
       const dir = projectDir(snap);
@@ -130,9 +203,10 @@ export class CaptionsView extends Stage {
   render(): HTMLElement[] {
     const gate = this.gate();
     const g = this.guid();
-    const caps = g ? this.captions.get(g) : undefined;
+    const caps = this.current();
+    const hasTr = !!(g && this.translations.get(g));
     const editor = caps ? h("div", { class: "rows caps" }, caps.slice(0, 400).map((c, i) => {
-      const low = c.lowConfidence.map((k) => c.words[k]?.word).filter(Boolean);
+      const low = (c.lowConfidence ?? []).map((k) => c.words?.[k]?.word).filter(Boolean);
       return h("div", { class: "cap-row" },
         h("div", { class: "cap-times ltr" },
           h("input", { class: "input frow-num", type: "number", step: 0.05, value: c.start.toFixed(2),
@@ -161,13 +235,36 @@ export class CaptionsView extends Stage {
         (v) => { this.language = v; this.host.rerender(); }),
       numField(t("maxChars"), this.maxChars ?? this.defaultMax(), (v) => { this.maxChars = Math.round(v); }, 1, 10, 80),
       h("p", { class: "muted small" }, t("firstRunModel")),
+      toggle(`${t("glossary")} · ${t("rules")} (${this.host.prefs.glossary.length} · ${this.host.prefs.rules.length})`, this.wordsOpen,
+        (v) => { this.wordsOpen = v; this.host.rerender(); }),
+      this.wordsOpen ? [
+        h("div", { class: "field" }, h("div", { class: "field-label" }, t("glossary")),
+          h("textarea", { class: "input textarea", dir: "auto", rows: 4, placeholder: t("glossaryHelp"),
+            oninput: (e: Event) => { this.glossaryText = (e.target as HTMLTextAreaElement).value; } },
+          this.glossaryText ?? this.host.prefs.glossary.join("\n"))),
+        h("div", { class: "field" }, h("div", { class: "field-label" }, t("rules")),
+          h("textarea", { class: "input textarea", dir: "auto", rows: 4, placeholder: t("rulesHelp"),
+            oninput: (e: Event) => { this.rulesText = (e.target as HTMLTextAreaElement).value; } },
+          this.rulesText ?? this.host.prefs.rules.map(([a, b]) => `${a} => ${b}`).join("\n"))),
+        h("p", { class: "muted small" }, t("rulesHelp")),
+        h("div", { class: "actions" }, button(t("saveWords"), () => this.saveWords(), { kind: "secondary" })),
+      ] : null,
+      g && this.host.speakers.get(g) ? h("p", { class: "muted small" }, t("speakersFromSeparation")) : null,
       ...this.status(),
       h("div", { class: "actions" },
         button(t("transcribe"), () => this.transcribe(), { kind: caps ? "secondary" : "primary", disabled: this.busy || !!gate }),
         caps ? button(t("rebuild"), () => this.rebuild(), { disabled: this.busy }) : null),
+      g && this.captions.get(g) ? [
+        choice(t("translateTo"), (["en", "ar"] as const).map((v) => ({ value: v, label: t(`tr_${v}` as Key) })), this.trTarget,
+          (v) => { this.trTarget = v; this.host.rerender(); }),
+        h("div", { class: "actions" }, button(t("translateRun"), () => this.translate(), { disabled: this.busy })),
+        hasTr ? choice(t("showing"), (["orig", "tr"] as const).map((v) => ({ value: v, label: t(`show_${v}` as Key) })), this.showing,
+          (v) => { this.showing = v; this.host.rerender(); }) : null,
+      ] : null,
       caps ? choice(t("style"), styles, this.style, (v) => { this.style = v; this.host.rerender(); }) : null,
       caps ? h("div", { class: "actions" },
         button(t("exportSrt"), () => this.srt(), { disabled: this.busy }),
+        button(t("nativeCaptions"), () => this.native(), { disabled: this.busy }),
         button(t("addCaptions"), () => this.place(), { kind: "primary", disabled: this.busy })) : null,
       editor)];
   }

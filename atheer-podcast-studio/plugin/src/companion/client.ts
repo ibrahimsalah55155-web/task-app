@@ -210,7 +210,29 @@ export interface AnalysisInfo {
   asrModels: Record<string, string>;
   asrDownloaded: string[];
   captionStyles: Record<string, { en: string; ar: string }>;
+  cleanupPresets?: Record<string, Record<string, unknown>>;
+  loudnessTargets?: Record<string, number>;
+  diarization?: boolean;
+  translation?: string[];
 }
+
+export interface CleanResult {
+  source: string; output: string; sampleRate: number; channels: number; duration: number; humHz: number;
+  lufsBefore: number; lufsAfter: number; truePeakAfter: number; gainDb: number; lagMs: number;
+}
+
+export interface ColorStatsJson { L: number; Lstd: number; a: number; b: number; chroma: number }
+
+export interface ColorMeasure {
+  reference: string;
+  stats: Record<string, ColorStatsJson>;
+  delta: Record<string, ColorStatsJson & { error: number }>;
+  luts?: Record<string, string>;
+}
+
+export interface SpeakerSegment { start: number; end: number; speaker: number }
+export interface SpeakerSummary { speaker: number; talk: number; sample: [number, number]; turns: number }
+export interface Diarization { segments: SpeakerSegment[]; speakers: SpeakerSummary[]; duration: number }
 
 export interface SyncResultRow {
   path: string;
@@ -422,6 +444,15 @@ export class CompanionClient {
   async findReels(words: Word[], count: number, minDur: number, maxDur: number): Promise<Reel[]> {
     return (await this.request<{ reels: Reel[] }>("POST", "/api/v1/reels/find",
       { body: { words, count, minDur, maxDur }, timeoutMs: 60000 })).reels;
+  }
+
+  async colorCompare(path: string, target: ColorStatsJson): Promise<{ stats: ColorStatsJson; delta: ColorStatsJson & { error: number } }> {
+    return await this.request("POST", "/api/v1/color/compare", { body: { path, target }, timeoutMs: 60000 });
+  }
+
+  /** Files in a folder (the engine reads the disk; the panel's own file access is limited to what you pick). */
+  async listFiles(dir: string, exts: string[], recursive = false): Promise<string[]> {
+    return (await this.request<{ files: string[] }>("POST", "/api/v1/fs/list", { body: { dir, exts, recursive }, timeoutMs: 30000 })).files;
   }
 
   async logs(tail = 200): Promise<string[]> {

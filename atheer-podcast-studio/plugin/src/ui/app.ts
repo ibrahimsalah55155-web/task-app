@@ -24,6 +24,7 @@ import { button, card, h, pill, progress, replace, row, type Tone } from "./dom.
 import { type Key, type Lang, defaultLang, getLang, isRtl, pick, setLang, t } from "./i18n.ts";
 import type { Transcript } from "../companion/client.ts";
 import { CaptionsView, ExportView, ReelsView } from "./delivery.ts";
+import { FinishView, MogrtView } from "./finishing.ts";
 import type { PhaseHost } from "./kit.ts";
 import { MotionView } from "./motion.ts";
 import { DirectorView, SilenceView, SyncView } from "./production.ts";
@@ -74,6 +75,8 @@ export class PanelApp {
   private readonly motion: MotionView;
   private readonly stageViews: Record<string, { render(): HTMLElement[] }>;
   private readonly transcripts = new Map<string, Transcript>();
+  private readonly speakers: PhaseHost["speakers"] = new Map();
+  private readonly mogrt: MogrtView;
 
   constructor(root: HTMLElement, tokens: TokenStore) {
     this.root = root;
@@ -112,12 +115,16 @@ export class PanelApp {
       notify: (tone, text) => this.notify(tone, text),
       refresh: () => this.refreshProject(),
       transcripts: this.transcripts,
+      speakers: this.speakers,
       prefs: this.prefs,
+      savePrefs: () => savePrefs(this.prefs),
     };
+    this.mogrt = new MogrtView(host);
     this.stageViews = {
       sync: new SyncView(host),
       silence: new SilenceView(host),
       director: new DirectorView(host),
+      finish: new FinishView(host),
       captions: new CaptionsView(host),
       reels: new ReelsView(host),
       export: new ExportView(host),
@@ -476,7 +483,7 @@ export class PanelApp {
         h("div", { class: "content" },
           view === "dashboard" ? this.renderDashboard()
             : view === "settings" ? this.renderSettings()
-              : view === "motion" ? this.motion.render()
+              : view === "motion" ? [...this.motion.render(), ...this.mogrt.render()]
                 : this.stageViews[view] ? this.stageViews[view]!.render()
                   : this.renderStage(view)),
         h("div", { class: "log", id: "log" })));

@@ -40,6 +40,23 @@ in `COMPATIBILITY.md` only after it passes here.
 | P5-02 | Reels: Find, keep 2, Create (9:16) | REEL_01/02_EDIT exist; frame 1080x1920; face roughly centred (report if Position is off) |
 | P6-01 | Export: select reels, choose preset + folder, Queue | Jobs appear in Media Encoder |
 
+## Finishing tools (0.4.0)
+
+| ID | Steps | Expected |
+|---|---|---|
+| F-01 | Audio & Colour › Clean voices (Standard, Podcast −16) on the synced sequence | `MAG Clean Audio` folder next to the project; mic clips now play the cleaned files; nothing moved on the timeline; voices clearer, hum gone; Loudness Meter ≈ −16 LUFS |
+| F-02 | Press **Original audio** | Mic clips play the original files again |
+| F-03 | Mic recorded inside a camera file (no separate WAV) | Panel says it is a video file and does not touch it |
+| F-04 | Match colours (reference = Wide) | Host/Guest cameras get a Lumetri on their master clip (Effect Controls › Master); looks close to Wide; panel reports difference before → after; `MAG Colour/*.cube` saved. **Report if it says Lumetri sliders were not found** (non-English Premiere UI) |
+| F-05 | Reset colours | Lumetri sliders back to neutral on every camera |
+| F-06 | Make multicam sequence, then right-click the clip › Multi-Camera › Enable | `<name>_MULTICAM` opens; Multi-Camera view in the Program monitor shows all cameras; cutting live works |
+| F-07 | Silence or Director with **Same sequence (+ backup)** | The open sequence is edited; `<name>_BACKUP_<time>` holds the previous version; Ctrl+Z works |
+| F-08 | Director › One shared mic › Separate speakers; Listen to each; set Host/Guest; Analyze; Apply | Two speakers found; Listen jumps the playhead to that person; cuts follow who talks |
+| F-09 | Captions › Names & words: add the guest's name and a correction `اثير => أثير`, Save, Transcribe | Name spelled as given; correction applied (panel says how many) |
+| F-10 | Captions › Translate to English, switch Showing ↔ Original, Export SRT, Add captions | English captions at the same times; `<seq>_en.srt`; styled English captions placed |
+| F-11 | Captions › **Premiere captions** | Either a Premiere caption track appears, or the panel says the SRT is in `05 Captions` (drag it onto the timeline). **Report which one happened** |
+| F-12 | Motion › MOGRT: Premiere's templates (or Choose folder), Insert one, change its text, Update text | Template at the playhead on a free track; text changes in the Program monitor. **Report if it says Premiere did not take the text** |
+
 ## Later phases (to be filled per phase)
 
 | ID | Question from the audit |

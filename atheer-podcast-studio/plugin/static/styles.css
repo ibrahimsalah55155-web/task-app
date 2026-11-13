@@ -363,3 +363,7 @@ body {
 .rtl .toggle .tick, .rtl .row .tick, .rtl .reel-h .tick { margin-right: 0; margin-left: 8px; }
 .rtl .frow-k, .rtl .reel-title, .rtl .reel-hook, .rtl .reel-text { text-align: right; }
 .rtl .slot-name { margin-right: 0; margin-left: 6px; }
+
+/* finishing tools */
+.textarea { width: 100%; min-height: 72px; resize: vertical; font-family: inherit; }
+.ltr-mixed { unicode-bidi: plaintext; }

@@ -7,6 +7,12 @@ export interface Prefs {
   lastView: string;
   accent: string;
   logoPath: string | null;
+  /** Transcription: names/words to favour, and corrections applied to every episode. */
+  glossary: string[];
+  rules: [string, string][];
+  /** Voice clean-up: cleaned file -> original file, to switch back. */
+  cleanMap: Record<string, string>;
+  mogrtDir: string | null;
 }
 
 const KEY = "mag.prefs.v1";
@@ -18,6 +24,10 @@ export const DEFAULT_PREFS: Prefs = {
   lastView: "dashboard",
   accent: "#EC797B",
   logoPath: null,
+  glossary: [],
+  rules: [],
+  cleanMap: {},
+  mogrtDir: null,
 };
 
 function storage(): Storage | null {

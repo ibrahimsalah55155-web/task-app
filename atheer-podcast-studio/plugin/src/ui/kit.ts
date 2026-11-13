@@ -1,6 +1,6 @@
 /** Shared pieces for the stage views: host interface, form controls, file pickers, transcription. */
 import type { Sequence } from "@adobe/premierepro";
-import type { CompanionClient, Transcript } from "../companion/client.ts";
+import type { CompanionClient, Diarization, Transcript } from "../companion/client.ts";
 import type { Prefs } from "../core/prefs.ts";
 import { getActiveProject, type ProjectSnapshot } from "../ppro/project.ts";
 import { guessRoles, readTimeline, type TimelineSpec } from "../ppro/timeline.ts";
@@ -16,7 +16,10 @@ export interface PhaseHost {
   notify(tone: Tone, text: string): void;
   refresh(): Promise<void>;
   transcripts: Map<string, Transcript>;
+  /** Speaker separation per sequence guid, with the role chosen for each speaker number. */
+  speakers: Map<string, { result: Diarization; roles: Record<number, "host" | "guest" | null> }>;
   prefs: Prefs;
+  savePrefs(): void;
 }
 
 export async function liveSequence(): Promise<{ project: NonNullable<Awaited<ReturnType<typeof getActiveProject>>>; seq: Sequence } | null> {
@@ -125,11 +128,24 @@ export async function transcribeActive(host: PhaseHost, model: string, language:
     name: t.name, role: t.index === roles.guestMic ? "guest" : t.index === roles.hostMic ? "host" : "other", pieces: t.pieces,
   }));
   if (!chosen.length) throw new Error("The sequence has no audio.");
-  const transcript = await host.client().runJob<Transcript>("transcribe",
-    { tracks: chosen, duration: tl.duration, model, language }, (j) => onProgress(j.progress, j.message));
   const guid = live.seq.guid.toString();
+  const sp = host.speakers.get(guid);
+  const spRoles = sp ? Object.fromEntries(Object.entries(sp.roles).filter(([, r]) => r)) : {};
+  const transcript = await host.client().runJob<Transcript>("transcribe", {
+    tracks: chosen, duration: tl.duration, model, language,
+    glossary: host.prefs.glossary, replacements: host.prefs.rules,
+    diarization: sp && Object.keys(spRoles).length ? { segments: sp.result.segments, roles: spRoles } : null,
+  }, (j) => onProgress(j.progress, j.message));
   host.transcripts.set(guid, transcript);
   return { guid, transcript, tl };
 }
 
 export const allWords = (t: Transcript) => t.segments.flatMap((s) => s.words);
+
+/** Text lines -> trimmed non-empty lines. */
+export const lines = (s: string) => s.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+
+/** "wrong => right" lines -> pairs (also accepts "=" or "→"). */
+export function parseRules(s: string): [string, string][] {
+  return lines(s).map((l) => l.split(/\s*(?:=>|→|=)\s*/)).filter((p) => p.length === 2 && p[0] && p[1]) as [string, string][];
+}

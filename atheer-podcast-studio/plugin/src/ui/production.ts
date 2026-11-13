@@ -1,5 +1,5 @@
 /** Stage views 1-3: Sync & Build, Smart Silence Cut, AI Auto Director. */
-import type { SilenceCandidate, Shot, SyncResultRow } from "../companion/client.ts";
+import type { Diarization, SilenceCandidate, Shot, SyncResultRow } from "../companion/client.ts";
 import { errorMessage, logger } from "../core/log.ts";
 import { ticksToTimecode } from "../core/time.ts";
 import { ppro } from "../ppro/api.ts";
@@ -16,12 +16,22 @@ const log = logger("stages");
 const fileName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 
 function cutMessage(r: CutReport, fps: { num: number; den: number }): [("ok" | "warn"), string] {
-  return r.mismatches.length === 0
-    ? ["ok", t("cutDone", { name: r.newSequenceName, n: r.verified, removed: ticksToTimecode(r.plan.removedTicks, fps) })]
-    : ["warn", t("cutIssues", { name: r.newSequenceName, bad: r.mismatches.length, first: r.mismatches[0] ?? "" })];
+  if (r.mismatches.length) return ["warn", t("cutIssues", { name: r.newSequenceName, bad: r.mismatches.length, first: r.mismatches[0] ?? "" })];
+  const done = t("cutDone", { name: r.newSequenceName, n: r.verified, removed: ticksToTimecode(r.plan.removedTicks, fps) });
+  return ["ok", r.backupName ? `${done} ${t("backupKept", { name: r.newSequenceName, backup: r.backupName })}` : done];
 }
 
-abstract class Stage {
+/** "New sequence" or "same sequence + backup". */
+export type CutMode = "copy" | "inplace";
+export function cutModeChoice(mode: CutMode, onChange: (m: CutMode) => void): HTMLElement {
+  return choice(t("cutMode"), (["copy", "inplace"] as const).map((v) => ({ value: v, label: t(`mode_${v}` as Key) })), mode, onChange);
+}
+const stamp = () => new Date().toISOString().slice(5, 16).replace(/[-:T]/g, "");
+export function cutNames(seqName: string, suffix: string, mode: CutMode): { newName: string; inPlace: boolean } {
+  return mode === "inplace" ? { newName: `${seqName}_BACKUP_${stamp()}`, inPlace: true } : { newName: `${seqName}_${suffix}`, inPlace: false };
+}
+
+export abstract class Stage {
   protected busy = false;
   protected progress = 0;
   protected message: string | null = null;
@@ -162,6 +172,7 @@ export class SilenceView extends Stage {
   private cands: SilenceCandidate[] | null = null;
   private approved = new Set<number>();
   private stats: { removable: number; count: number; newDuration: number } | null = null;
+  private mode: CutMode = "copy";
 
   private async ensureTimeline(): Promise<TimelineSpec> {
     const live = await liveSequence();
@@ -219,7 +230,7 @@ export class SilenceView extends Stage {
       const live = await liveSequence();
       if (!live || !this.cands) return;
       const remove = this.cands.filter((_, i) => this.approved.has(i)).map((c) => ({ start: secondsToTicks(c.start), end: secondsToTicks(c.end) }));
-      const report = await buildCutSequence(live.project, live.seq, { remove, newName: `${live.seq.name}_SILENCE_CUT`,
+      const report = await buildCutSequence(live.project, live.seq, { remove, ...cutNames(live.seq.name, "SILENCE_CUT", this.mode),
         onProgress: (_s, f) => { this.progress = f; this.host.rerender(); } });
       const fps = this.host.snapshot()?.activeSequence?.fps ?? { num: 25, den: 1 };
       this.host.notify(...cutMessage(report, fps));
@@ -262,6 +273,7 @@ export class SilenceView extends Stage {
       toggle(t("keepBreath"), this.breath, (v) => { this.breath = v; this.host.rerender(); }),
       ...this.status(),
       this.stats ? h("p", { class: "small" }, t("pauses", { n: this.stats.count, sec: this.stats.removable.toFixed(1), len: fmtTime(this.stats.newDuration) })) : null,
+      this.cands ? cutModeChoice(this.mode, (m) => { this.mode = m; this.host.rerender(); }) : null,
       this.cands ? h("div", { class: "actions" },
         button(t("selectAll"), () => { this.approved = new Set(this.cands!.map((_, i) => i)); this.host.rerender(); }, { kind: "ghost" }),
         button(t("selectNone"), () => { this.approved.clear(); this.host.rerender(); }, { kind: "ghost" })) : null,
@@ -283,6 +295,36 @@ export class DirectorView extends Stage {
   private map: { guestMic: number | null; hostMic: number | null; guestCam: number | null; hostCam: number | null; wideCam: number | null } | null = null;
   private params = { minShot: 2.0, maxShot: 0, both: "wide", silence: "hold", sensitivity: 0.5, delay: 0 };
   private shots: Shot[] | null = null;
+  private mode: CutMode = "copy";
+  private micMode: "two" | "one" = "two";
+  private sharedMic: number | null = null;
+
+  private speakers() {
+    const g = this.host.snapshot()?.activeSequence?.guid;
+    return g ? this.host.speakers.get(g) ?? null : null;
+  }
+
+  private separate(): void {
+    void this.run(async () => {
+      await this.ensureTimeline();
+      const tl = this.tl!;
+      const mic = tl.audio.find((x) => x.index === (this.sharedMic ?? this.map?.guestMic));
+      if (!mic) throw new Error(t("sharedMic"));
+      const info = await this.host.client().analysisInfo();
+      if (info.diarization === false) throw new Error(t("diarizeMissing"));
+      const result = await this.host.client().runJob<Diarization>("diarize", {
+        track: { name: mic.name, pieces: mic.pieces }, duration: tl.duration, speakers: 2 }, this.onJob);
+      const roles: Record<number, "host" | "guest" | null> = {};
+      result.speakers.forEach((s, i) => { roles[s.speaker] = i === 0 ? "guest" : i === 1 ? "host" : null; });
+      this.host.speakers.set(this.host.snapshot()!.activeSequence!.guid, { result, roles });
+      this.host.notify("ok", t("speakersFound", { n: result.speakers.length }));
+    });
+  }
+
+  private async listen(sec: number): Promise<void> {
+    const live = await liveSequence();
+    if (live) await live.seq.setPlayerPosition(ppro().TickTime.createWithTicks(String(secondsToTicks(sec))));
+  }
 
   private async ensureTimeline(): Promise<void> {
     const live = await liveSequence();
@@ -296,12 +338,19 @@ export class DirectorView extends Stage {
       await this.ensureTimeline();
       const tl = this.tl!;
       const m = this.map!;
-      const g = tl.audio.find((x) => x.index === m.guestMic);
-      const hh = tl.audio.find((x) => x.index === m.hostMic);
-      if (!g || !hh) throw new Error(`${t("guestMicTrack")} / ${t("hostMicTrack")}`);
-      const res = await this.host.client().runJob<{ shots: Shot[] }>("director", {
-        guest: { name: g.name, pieces: g.pieces }, host: { name: hh.name, pieces: hh.pieces }, duration: tl.duration, params: this.params,
-      }, this.onJob);
+      let body: Record<string, unknown>;
+      if (this.micMode === "one") {
+        const sp = this.speakers();
+        const roles = sp ? Object.fromEntries(Object.entries(sp.roles).filter(([, r]) => r)) : {};
+        if (!sp || !Object.values(roles).includes("host") || !Object.values(roles).includes("guest")) throw new Error(t("needSpeakers"));
+        body = { diarization: { segments: sp.result.segments, roles }, duration: tl.duration, params: this.params };
+      } else {
+        const g = tl.audio.find((x) => x.index === m.guestMic);
+        const hh = tl.audio.find((x) => x.index === m.hostMic);
+        if (!g || !hh) throw new Error(`${t("guestMicTrack")} / ${t("hostMicTrack")}`);
+        body = { guest: { name: g.name, pieces: g.pieces }, host: { name: hh.name, pieces: hh.pieces }, duration: tl.duration, params: this.params };
+      }
+      const res = await this.host.client().runJob<{ shots: Shot[] }>("director", body, this.onJob);
       this.shots = res.shots;
     });
   }
@@ -317,7 +366,7 @@ export class DirectorView extends Stage {
       const camAt = (sec: number) => (shots.find((s) => sec >= s.start && sec < s.end) ?? shots[shots.length - 1]!).camera;
       const report = await buildCutSequence(live.project, live.seq, {
         splitAt: shots.slice(1).map((s) => secondsToTicks(s.start)),
-        newName: `${live.seq.name}_DIRECTOR`,
+        ...cutNames(live.seq.name, "DIRECTOR", this.mode),
         disable: (p) => {
           if (p.kind !== "video" || !(p.track in role)) return null;
           const mid = Number(p.dest + (p.srcOut - p.srcIn) / 2n) / 254016000000;
@@ -329,7 +378,8 @@ export class DirectorView extends Stage {
         const fps = this.host.snapshot()?.activeSequence?.fps ?? { num: 25, den: 1 };
         this.host.notify(...cutMessage(report, fps));
       } else {
-        this.host.notify("ok", t("directorDone", { name: report.newSequenceName, n: shots.length }));
+        const done = t("directorDone", { name: report.newSequenceName, n: shots.length });
+        this.host.notify("ok", report.backupName ? `${done} ${t("backupKept", { name: report.newSequenceName, backup: report.backupName })}` : done);
       }
       await this.host.refresh();
     });
@@ -356,9 +406,27 @@ export class DirectorView extends Stage {
     return [card(t("directorTitle"), this.shots ? pill(String(this.shots.length), "info") : null,
       h("p", { class: "muted small" }, t("directorHelp")),
       gate,
-      tl && m ? [
+      choice(t("micMode"), (["two", "one"] as const).map((v) => ({ value: v, label: t(`mic_${v}` as Key) })), this.micMode,
+        (v) => { this.micMode = v; this.host.rerender(); }),
+      tl && m && this.micMode === "two" ? [
         trackSelect(t("guestMicTrack"), tl.audio, m.guestMic, (v) => { m.guestMic = v; this.host.rerender(); }),
         trackSelect(t("hostMicTrack"), tl.audio, m.hostMic, (v) => { m.hostMic = v; this.host.rerender(); }),
+      ] : null,
+      tl && m && this.micMode === "one" ? [
+        trackSelect(t("sharedMic"), tl.audio, this.sharedMic ?? m.guestMic, (v) => { this.sharedMic = v; this.host.rerender(); }),
+        h("div", { class: "actions" }, button(t("separate"), () => this.separate(), { disabled: this.busy || !!gate })),
+        this.speakers() ? this.speakers()!.result.speakers.map((s) => {
+          const sp = this.speakers()!;
+          return h("div", { class: "frow" },
+            h("span", { class: "frow-k" }, `${t("speakerN", { n: s.speaker + 1 })} · ${t("talkTime", { sec: Math.round(s.talk) })}`),
+            button(t("listen"), () => void this.listen(s.sample[0]), { kind: "ghost" }),
+            h("div", { class: "seg" }, (["host", "guest"] as const).map((r) => h("div", {
+              class: `seg-item${sp.roles[s.speaker] === r ? " is-active" : ""}`, role: "button", tabindex: 0,
+              onclick: () => { sp.roles[s.speaker] = r; this.host.rerender(); },
+            }, t(`camShort_${r}` as Key)))));
+        }) : h("p", { class: "muted small" }, t("needSpeakers")),
+      ] : null,
+      tl && m ? [
         trackSelect(t("guestCamTrack"), tl.video, m.guestCam, (v) => { m.guestCam = v; this.host.rerender(); }),
         trackSelect(t("hostCamTrack"), tl.video, m.hostCam, (v) => { m.hostCam = v; this.host.rerender(); }),
         trackSelect(t("wideCamTrack"), tl.video, m.wideCam, (v) => { m.wideCam = v; this.host.rerender(); }),
@@ -378,6 +446,7 @@ export class DirectorView extends Stage {
       h("div", { class: "actions" },
         button(t("analyze"), () => this.analyze(), { kind: this.shots ? "secondary" : "primary", disabled: this.busy || !!gate }),
         this.shots ? button(t("applyDirector"), () => this.apply(), { kind: "primary", disabled: this.busy }) : null),
+      this.shots ? cutModeChoice(this.mode, (md) => { this.mode = md; this.host.rerender(); }) : null,
       h("p", { class: "muted small" }, t("undoHint")))];
   }
 }

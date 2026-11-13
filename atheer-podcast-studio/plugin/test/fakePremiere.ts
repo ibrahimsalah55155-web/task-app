@@ -65,6 +65,69 @@ export class FakeFolder {
 
 let idCounter = 0;
 
+// ---- effects (components) -------------------------------------------------------------
+
+export class FakeParam {
+  displayName: string;
+  value: unknown;
+  rejectStrings = false;
+  constructor(displayName: string, value: unknown) {
+    this.displayName = displayName;
+    this.value = value;
+  }
+  createKeyframe(v: unknown) {
+    return { value: { value: v } };
+  }
+  createSetValueAction(kf: { value: { value: unknown } }, _safe?: boolean) {
+    requireLock("createSetValueAction");
+    return new Action(`param:${this.displayName}`, () => {
+      if (!(this.rejectStrings && typeof kf.value.value === "string")) this.value = kf.value.value;
+    });
+  }
+  async getStartValue() {
+    return { value: { value: this.value } };
+  }
+}
+
+export class FakeComponent {
+  matchName: string;
+  params: FakeParam[];
+  constructor(matchName: string, params: FakeParam[]) {
+    this.matchName = matchName;
+    this.params = params;
+  }
+  async getMatchName() {
+    return this.matchName;
+  }
+  async getDisplayName() {
+    return this.matchName;
+  }
+  getParamCount() {
+    return this.params.length;
+  }
+  getParam(i: number) {
+    return this.params[i]!;
+  }
+}
+
+export const LUMETRI_PARAMS = ["Basic Correction", "Input LUT", "White Balance", "Temperature", "Tint", "Exposure", "Contrast",
+  "Highlights", "Shadows", "Whites", "Blacks", "Saturation", "Creative", "Faded Film", "Sharpen", "Vibrance", "Saturation"];
+
+export class FakeChain {
+  comps: FakeComponent[] = [new FakeComponent("AE.ADBE Opacity", [new FakeParam("Opacity", 100)]),
+    new FakeComponent("AE.ADBE Motion", [new FakeParam("Position", 0), new FakeParam("Scale", 100)])];
+  getComponentCount() {
+    return this.comps.length;
+  }
+  getComponentAtIndex(i: number) {
+    return this.comps[i]!;
+  }
+  createAppendComponentAction(c: FakeComponent) {
+    requireLock("createAppendComponentAction");
+    return new Action(`append:${c.matchName}`, () => this.comps.push(c));
+  }
+}
+
 export class FakeSeqItem {
   name: string;
   parent: FakeFolder | null = null;
@@ -77,6 +140,16 @@ export class FakeSeqItem {
   }
   getParentBin() {
     return this.parent ?? fakeRoot!;
+  }
+  // a sequence used as media (nesting)
+  lengthTicks = 0;
+  hasVideo = true;
+  hasAudio = true;
+  async isSequence() {
+    return true;
+  }
+  getId() {
+    return `seqitem-${this.name}`;
   }
 }
 
@@ -110,6 +183,11 @@ export class FakeClip {
   hasVideo = true;
   hasAudio = false;
   relinkedTo: string | null = null;
+  isCaption = false;
+  chain = new FakeChain();
+  async getComponentChain(_type: unknown) {
+    return this.chain;
+  }
   async canChangeMediaPath() {
     return true;
   }
@@ -170,6 +248,10 @@ export class FakeTrackItem {
   createSetDisabledAction(d: boolean) {
     requireLock("createSetDisabledAction");
     return new Action(`disable:${d}`, () => (this.disabled = d));
+  }
+  chain = new FakeChain();
+  async getComponentChain() {
+    return this.chain;
   }
 }
 
@@ -252,8 +334,9 @@ export class FakeSequence {
   async getAudioTrack(i: number) {
     return this.audio[i];
   }
+  captionTracks = 0;
   async getCaptionTrackCount() {
-    return 0;
+    return this.captionTracks;
   }
   inPoint = 0;
   outPoint = 0;
@@ -268,6 +351,7 @@ export class FakeSequence {
   }
   async getProjectItem() {
     if (!this.item) this.item = new FakeSeqItem(this.name);
+    this.item.lengthTicks = Number((await this.getEndTime()).ticksNumber);
     return this.item;
   }
   createCloneAction() {
@@ -307,10 +391,19 @@ export class FakeProject {
   imports: string[] = [];
   importLengthTicks = TPS * 6;
   mediaLength: Record<string, number> = {};
+  /** How Premiere treats an inserted .srt item in this simulation. */
+  captionInsert: "caption-track" | "video-track" | "refuse" = "caption-track";
+  deleted: string[] = [];
+  async deleteSequence(seq: FakeSequence) {
+    this.sequences = this.sequences.filter((s) => s !== seq);
+    this.deleted.push(seq.name);
+    return true;
+  }
   async importFiles(paths: string[], _suppress: boolean, bin: FakeFolder) {
     for (const p of paths) {
       this.imports.push(p);
       const c = new FakeClip(p.split(/[\\/]/).pop()!, p);
+      c.isCaption = /\.srt$/i.test(p);
       c.lengthTicks = this.mediaLength[p] ?? this.importLengthTicks;
       c.hasVideo = !/\.(wav|mp3|m4a|aac)$/i.test(p);
       c.hasAudio = !/\.(png|jpg)$/i.test(p) && !p.includes("MAG Graphics");
@@ -412,7 +505,19 @@ export function buildFake(): Fake {
     },
     Markers: { getMarkers: async (s: FakeSequence) => s.markers },
     TickTime: { TIME_ZERO: new FakeTickTime(0), createWithTicks: (t: string) => new FakeTickTime(Number(t)) },
-    SequenceEditor: { getEditor: (seq: FakeSequence) => fakeEditor(seq) },
+    SequenceEditor: { getEditor: (seq: FakeSequence) => fakeEditor(seq), getInstalledMogrtPath: async () => "/Adobe/Essential Graphics" },
+    VideoFilterFactory: {
+      getMatchNames: async () => ["AE.ADBE Mosaic", "AE.ADBE Lumetri", "PR.ADBE Solarize"],
+      createComponent: async (m: string) => new FakeComponent(m, m.includes("Lumetri")
+        ? LUMETRI_PARAMS.map((n) => new FakeParam(n, n === "Saturation" ? 100 : 0)) : []),
+    },
+    Exporter: {
+      frames: [] as { seq: string; ticks: number; file: string; dir: string }[],
+      async exportSequenceFrame(seq: FakeSequence, time: FakeTickTime, file: string, dir: string) {
+        this.frames.push({ seq: seq.name, ticks: time.ticksNumber, file, dir });
+        return true;
+      },
+    },
     TrackItemSelection: {
       createEmptySelection(cb: (sel: { items: FakeTrackItem[]; addItem(i: FakeTrackItem): boolean }) => void) {
         const sel = { items: [] as FakeTrackItem[], addItem(i: FakeTrackItem) { this.items.push(i); return true; } };
@@ -424,7 +529,7 @@ export function buildFake(): Fake {
     EventManager: { addGlobalEventListener: () => undefined },
     Constants: {
       TrackItemType: { CLIP: "CLIP" },
-      MediaType: { ANY: "ANY" },
+      MediaType: { ANY: "ANY", VIDEO: "VIDEO", AUDIO: "AUDIO" },
       SequenceEvent: { ACTIVATED: "seqActivated", CLOSED: "seqClosed" },
       ProjectEvent: { OPENED: "projOpened", CLOSED: "projClosed", ACTIVATED: "projActivated" },
     },
@@ -467,7 +572,12 @@ function fakeEditor(seq: FakeSequence) {
     createInsertProjectItemAction(clip: FakeClip, time: FakeTickTime, v: number, a: number, limitShift: boolean) {
       requireLock("createInsertProjectItemAction");
       if (!limitShift) throw new Error("insert must not shift other tracks");
+      if (clip.isCaption && seq.project?.captionInsert === "refuse") throw new Error("Unsupported media type");
       return new Action(`insert:${clip.name}`, () => {
+        if (clip.isCaption && seq.project?.captionInsert === "caption-track") {
+          seq.captionTracks++;
+          return;
+        }
         // Like Premiere: an index past the end creates exactly ONE track (at the end).
         const place = (tracks: FakeTrack[], idx: number, kind: string) => {
           if (idx > tracks.length) throw new Error(`${kind} track ${idx + 1} requested but only ${tracks.length} exist`);
@@ -477,6 +587,19 @@ function fakeEditor(seq: FakeSequence) {
         if (clip.hasVideo) place(seq.video, v, "Video");
         if (clip.hasAudio) place(seq.audio, a, "Audio");
       });
+    },
+    insertMogrtFromPath(path: string, time: FakeTickTime, v: number, _a: number) {
+      requireLock("insertMogrtFromPath");
+      const c = new FakeClip(path.split("/").pop()!, path);
+      const item = new FakeTrackItem(c, time.ticksNumber, time.ticksNumber + 5 * TPS, 0);
+      item.chain.comps.push(new FakeComponent("AE.ADBE Capsule", [
+        new FakeParam("Name", JSON.stringify({ textEditValue: "Your Name", fontEditValue: ["Cairo"] })),
+        new FakeParam("Role", "Your role"),
+        new FakeParam("Size", 80),
+      ]));
+      if (v === seq.video.length) seq.video.push(new FakeTrack(`Video ${v + 1}`, []));
+      overwrite(seq.video[v]!, item);
+      return [item];
     },
     createRemoveItemsAction(sel: { items: FakeTrackItem[] }, ripple: boolean) {
       requireLock("createRemoveItemsAction");

@@ -1,6 +1,6 @@
 {
   "name": "mag-podcast-studio-panel",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Multimedia & AI Group - Podcast Studio panel for Adobe Premiere Pro 2026",
   "type": "module",

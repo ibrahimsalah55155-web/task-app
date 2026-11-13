@@ -115,6 +115,12 @@ class DiarizeBody(BaseModel):
     speakers: int = Field(default=2, ge=0, le=6)  # 0 = find out
 
 
+class ListBody(BaseModel):
+    dir: str
+    exts: list[str] = Field(min_length=1, max_length=20)
+    recursive: bool = False
+
+
 class TranslateBody(BaseModel):
     captions: list[dict[str, Any]]
     source: str = "ar"
@@ -304,6 +310,25 @@ def register(app: FastAPI, jobs: JobManager, store: Store, data_dir: Path, ffmpe
                 "asrDownloaded": downloaded, "captionStyles": STYLES,
                 "cleanupPresets": cleanup.PRESETS, "loudnessTargets": cleanup.LOUDNESS_TARGETS,
                 "diarization": diarize.available(), "translation": translate.available_pairs()}
+
+    @app.post(PREFIX + "/fs/list", dependencies=authed)
+    async def fs_list(body: ListBody) -> dict[str, Any]:
+        root = Path(body.dir)
+        if not root.is_absolute() or not root.is_dir():
+            raise HTTPException(400, detail={"code": "bad_request", "message": "not a folder"})
+        exts = {e.lower().lstrip(".") for e in body.exts}
+
+        def scan() -> list[str]:
+            it = root.rglob("*") if body.recursive else root.iterdir()
+            out = []
+            for p in it:
+                if p.is_file() and p.suffix.lower().lstrip(".") in exts:
+                    out.append(str(p))
+                if len(out) >= 2000:
+                    break
+            return sorted(out, key=str.lower)
+
+        return {"files": await asyncio.to_thread(scan)}
 
     @app.post(PREFIX + "/color/compare", dependencies=authed)
     async def color_compare(body: ColorCompareBody) -> dict[str, Any]:

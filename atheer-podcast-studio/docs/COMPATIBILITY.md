@@ -40,8 +40,23 @@ Premiere that enforces Adobe's lock rules; end-to-end in the demo harness with t
 | 5 Captions | Built, tested outside Premiere; real Arabic ASR tested in CI | faster-whisper locally (model downloaded once), Arabic segmentation, editor, SRT, 4 styles as transparent stills placed at exact times |
 | 6 Motion Library | Built, tested outside Premiere | 6 templates rendered by the engine (ProRes 4444) |
 | 7 Export | Built, not run | EncoderManager queue/immediate with your .epr preset, only for selected sequences |
-| Premiere multicam source sequence | Blocked by Adobe API | Stacked tracks instead |
-| Native caption track from text | Blocked by Adobe API | SRT export + styled stills on a video track |
+| Premiere multicam source sequence | Workaround (0.4.0) | Nested sequence + Multi-Camera enable (see below) |
+| Native caption track from text | Workaround (0.4.0) | SRT → caption track (verified) or one drag from the bin |
+
+## Finishing tools (0.4.0)
+
+| Capability | Status | How / evidence |
+|---|---|---|
+| Voice clean-up (noise, hum, harsh S, level, loudness) | Built, tested outside Premiere (Linux + Windows CI) | RNNoise voice model + notch + de-esser + EQ + compressor + exact-gain loudness with look-ahead limiter. Output is checked to be sample-aligned with the original (GCC-PHAT, < 1 ms) before the panel swaps media (`changeMediaFilePath`); original files untouched; one-click back |
+| Camera colour match | Built, tested outside Premiere | Lumetri on each camera's master clip, closed loop: Premiere renders test frames (`Exporter.exportSequenceFrame`), engine measures, panel corrects (secant solver, tested against simulated unknown slider scales). LUTs saved too. **Slider names are matched in English** (QA F-04) |
+| Premiere Multi-Camera | Built (workaround), tested outside Premiere | No API creates a multicam source sequence; the panel nests the synced sequence, then one right-click enables Multi-Camera |
+| Cut in the same sequence | Built, tested outside Premiere | Cut engine rebuilds the open sequence after keeping a full backup copy |
+| Speaker separation from one mic | Built; real model test passes in CI | sherpa-onnx + pyannote segmentation-3.0 + 3D-Speaker embedding, bundled. CI: host/guest/host turns labelled correctly |
+| Caption translation Arabic ↔ English | Built; real model test passes in CI (Linux + Windows) | OPUS-MT via CTranslate2 int8, bundled; sentence-level, caption times kept |
+| Better Arabic/Egyptian recognition | Built | Glossary (Whisper prompt + hotwords) and persistent correction rules |
+| Real Premiere caption track | Built with fallback; to verify (QA F-11) | SRT imported and inserted on a new track index; if Premiere does not make a caption track, the stray item is removed and the SRT stays in the bin for one drag |
+| MOGRT templates with editable text | Built; to verify (QA F-12) | `insertMogrtFromPath` + string parameters (JSON `textEditValue` kept), read back after setting |
+| macOS package | Not built | The editor works on one Windows machine; available on request |
 
 ## Premiere versions
 

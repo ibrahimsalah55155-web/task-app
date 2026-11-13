@@ -253,3 +253,14 @@ def test_translation_reports_missing_models(monkeypatch, tmp_path):
             translate.OpusMT("ar", "en")
     with pytest.raises(translate.TranslateError):
         translate.OpusMT("ar", "fr")
+
+
+def test_fs_list(authed, tmp_path):
+    (tmp_path / "a.mogrt").write_text("x")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "b.MOGRT").write_text("x")
+    (tmp_path / "c.txt").write_text("x")
+    flat = authed.post("/api/v1/fs/list", json={"dir": str(tmp_path), "exts": ["mogrt"]}).json()["files"]
+    deep = authed.post("/api/v1/fs/list", json={"dir": str(tmp_path), "exts": ["mogrt"], "recursive": True}).json()["files"]
+    assert [Path(f).name for f in flat] == ["a.mogrt"] and len(deep) == 2
+    assert authed.post("/api/v1/fs/list", json={"dir": "rel", "exts": ["mogrt"]}).status_code == 400
