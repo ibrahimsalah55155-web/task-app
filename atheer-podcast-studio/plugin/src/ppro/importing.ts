@@ -33,7 +33,7 @@ export async function walk(folder: FolderItem, visit: (item: ProjectItem, parent
 }
 
 /** Every clip in the project for each wanted path (media path first, file name as fallback). */
-async function locate(project: Project, paths: string[], taken: Set<ProjectItem>): Promise<Map<string, Found>> {
+async function locate(project: Project, paths: string[], taken: Set<ProjectItem>, byNameAllowed = true): Promise<Map<string, Found>> {
   const P = ppro();
   const byPath = new Map(paths.map((p) => [norm(p), p]));
   const out = new Map<string, Found>();
@@ -57,7 +57,7 @@ async function locate(project: Project, paths: string[], taken: Set<ProjectItem>
     if (want && !out.has(want)) out.set(want, { clip, item, parent });
     else byName.push({ item, clip, parent });
   });
-  for (const p of paths) {
+  for (const p of byNameAllowed ? paths : []) {
     if (out.has(p)) continue;
     const hit = byName.find((x) => !taken.has(x.item) && (norm(x.item.name) === base(p) || norm(x.item.name) === stem(p)));
     if (hit) {
@@ -78,14 +78,20 @@ export async function importAndFind(project: Project, paths: string[], bin: Fold
                                     opts: { timeoutMs?: number; reuse?: boolean } = {}): Promise<Map<string, Imported>> {
   const timeoutMs = opts.timeoutMs ?? 20000;
   const taken = new Set<ProjectItem>();
-  let found = opts.reuse === false ? new Map<string, Found>() : await locate(project, paths, taken);
+  // Before importing, only an exact media-path match counts (a same-named file from an earlier
+  // render must not be reused). Items already in the project are excluded from the name fallback later.
+  const before = new Set<ProjectItem>();
+  await walk(await project.getRootItem(), async (item) => {
+    before.add(item);
+  });
+  let found = opts.reuse === false ? new Map<string, Found>() : await locate(project, paths, taken, false);
   const missing = paths.filter((p) => !found.has(p));
   if (missing.length) {
     const ok = await project.importFiles(missing, true, bin as unknown as ProjectItem, false);
     if (!ok) throw new Error(`Premiere could not import ${missing.length} file(s), e.g. ${missing[0]}`);
     const deadline = Date.now() + timeoutMs;
     for (;;) {
-      found = await locate(project, paths, new Set());
+      found = await locate(project, paths, new Set([...before].filter((i) => ![...found.values()].some((f) => f.item === i))));
       if (paths.every((p) => found.has(p)) || Date.now() > deadline) break;
       await sleep(400);
     }

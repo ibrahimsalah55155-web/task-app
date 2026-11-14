@@ -135,6 +135,12 @@ def render_caption_stills(captions: list[dict[str, Any]], style: str, width: int
     if style not in STYLES:
         raise ValueError(f"unknown caption style {style}")
     out_dir.mkdir(parents=True, exist_ok=True)
+    # File names unique per render: Premiere (and the panel) must never mistake an older render's
+    # CAP_0001.png for this one's.
+    import hashlib
+    import time as _time
+
+    run = hashlib.sha1(f"{out_dir}|{_time.time_ns()}".encode()).hexdigest()[:6]
     ctx = Ctx(w=width, h=height, accent=accent or ACCENT)
     items: list[dict[str, Any]] = []
     total = len(captions)
@@ -155,7 +161,7 @@ def render_caption_stills(captions: list[dict[str, Any]], style: str, width: int
                 continue
             f = Frame(width, height)
             _draw_caption(f, ctx, c["text"], style, c.get("speaker"), hl)
-            name = f"CAP_{i + 1:04d}{'' if hl is None else f'_{hl + 1:02d}'}.png"
+            name = f"CAP_{run}_{i + 1:04d}{'' if hl is None else f'_{hl + 1:02d}'}.png"
             path = out_dir / name
             Image.fromarray(f.to_rgba8(), "RGBA").save(path, optimize=False, compress_level=6)
             items.append({"path": str(path), "start": round(a, 3), "end": round(b, 3), "caption": i})

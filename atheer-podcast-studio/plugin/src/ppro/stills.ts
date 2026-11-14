@@ -51,8 +51,22 @@ export async function placeStills(project: Project, seq: Sequence, stills: Timed
   const bin = await subBin(project, CHILD_BINS[4], binName);
   const clips = await importAndFind(project, stills.map((s) => s.path), bin);
 
-  const sorted = [...stills].sort((a, b) => a.start - b.start);
-  const range = { start: secondsToTicks(sorted[0]!.start), end: secondsToTicks(Math.max(...sorted.map((s) => s.end))) };
+  // Premiere snaps clip starts/ends to frames: work in whole frames so every placed still is found again.
+  let tpf = 0n;
+  try {
+    tpf = parseTicks(await seq.getTimebase());
+  } catch {
+    tpf = 0n;
+  }
+  const snap = (sec: number): bigint => {
+    const t = secondsToTicks(sec);
+    return tpf > 0n ? ((t + tpf / 2n) / tpf) * tpf : t;
+  };
+  const sorted = [...stills].sort((a, b) => a.start - b.start)
+    .map((s) => ({ ...s, s0: snap(s.start), s1: snap(s.end) }))
+    .filter((s, i, arr) => s.s1 > s.s0 && (i === 0 || s.s0 !== arr[i - 1]!.s0));
+  if (!sorted.length) throw new Error("Nothing to place.");
+  const range = { start: sorted[0]!.s0, end: sorted.reduce((m, s) => (s.s1 > m ? s.s1 : m), 0n) };
   const CLIP = P.Constants.TrackItemType.CLIP;
   const busy: Interval[][] = [];
   for (let i = 0; i < (await seq.getVideoTrackCount()); i++) {
@@ -64,7 +78,7 @@ export async function placeStills(project: Project, seq: Sequence, stills: Timed
   const { index, isNew } = chooseTrack(busy, range);
   const editor = P.SequenceEditor.getEditor(seq);
   const undo = "MAG: Add captions";
-  const at = (s: TimedStill) => P.TickTime.createWithTicks(String(secondsToTicks(s.start)));
+  const at = (s: { s0: bigint }) => P.TickTime.createWithTicks(String(s.s0));
   const item = (s: TimedStill) => clips.get(s.path)!.item;
 
   let rest = sorted;
@@ -92,13 +106,15 @@ export async function placeStills(project: Project, seq: Sequence, stills: Timed
 
   // exact ends
   const placed = (await seq.getVideoTrack(index)).getTrackItems(CLIP, false) as VideoClipTrackItem[];
-  const byStart = new Map<string, VideoClipTrackItem>();
-  for (const it of placed) byStart.set(String(parseTicks((await it.getStartTime()).ticks)), it);
+  const starts: [bigint, VideoClipTrackItem][] = [];
+  for (const it of placed) starts.push([parseTicks((await it.getStartTime()).ticks), it]);
+  const tol = tpf > 0n ? tpf / 2n : 1n;
   const fixes: [VideoClipTrackItem, bigint][] = [];
   for (const s of sorted) {
-    const it = byStart.get(String(secondsToTicks(s.start)));
-    if (it) fixes.push([it, secondsToTicks(s.end)]);
+    const hit = starts.find(([t]) => (t > s.s0 ? t - s.s0 : s.s0 - t) <= tol);
+    if (hit) fixes.push([hit[1], s.s1]);
   }
+  if (fixes.length < sorted.length) log.warn(`${sorted.length - fixes.length} caption(s) not found again for their exact end`);
   if (fixes.length) {
     let committed = false;
     project.lockedAccess(() => {

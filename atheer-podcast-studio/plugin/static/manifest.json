@@ -1,7 +1,7 @@
 {
   "id": "com.multimediaai.podcaststudio",
   "name": "Multimedia & AI Group",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "main": "index.html",
   "manifestVersion": 5,
   "host": {

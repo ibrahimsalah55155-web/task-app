@@ -79,3 +79,19 @@ test("graphics and caption stills still go on the timeline when Premiere imports
   const placed = await placeStills(project as never, seq as never, stills, "EP podcast");
   assert.equal(placed.count, 3);
 });
+
+test("a second caption render never reuses the first render's same-named images; off-frame times are snapped", async () => {
+  const { placeStills } = await import("../src/ppro/stills.ts");
+  const first = [0, 1].map((k) => ({ path: `C:\\Proj\\MAG Captions\\EP_a\\CAP_0001${k}.png`, start: 40 + k * 2, end: 41.5 + k * 2 }));
+  await placeStills(project as never, seq as never, first, "EP a");
+  const second = [0, 1, 2].map((k) => ({ path: `C:\\Proj\\MAG Captions\\EP_b\\CAP_0001${k}.png`, start: 50.013 + k * 1.7, end: 51.6 + k * 1.7 }));
+  const r = await placeStills(project as never, seq as never, second, "EP b");
+  assert.equal(r.count, 3);
+  const used = seq.video[r.track]!.items.filter((i) => i.start >= 49 * TPS).map((i) => i.clip!.path);
+  assert.ok(used.every((p) => p.includes("EP_b")), `old images reused: ${used.join(", ")}`);
+  const F25 = 10160640000;
+  for (const it of seq.video[r.track]!.items.filter((i) => i.start >= 49 * TPS)) {
+    assert.equal(it.start % F25, 0, "start on a frame");
+    assert.equal(it.end % F25, 0, "end on a frame (exact end applied)");
+  }
+});
