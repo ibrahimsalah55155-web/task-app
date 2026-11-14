@@ -10,7 +10,7 @@ import { finishTransaction } from "../ppro/transaction.ts";
 import { guessRoles, readTimeline, secondsToTicks, type TimelineSpec } from "../ppro/timeline.ts";
 import { button, card, h, pill, progress } from "./dom.ts";
 import { type Key, t } from "./i18n.ts";
-import { MEDIA_TYPES, type PhaseHost, choice, fmtTime, liveSequence, numField, pickFiles, toggle, trackSelect } from "./kit.ts";
+import { MEDIA_TYPES, type PhaseHost, choice, fmtTime, liveSequence, numField, pickFiles, pickFolder, toggle, trackSelect } from "./kit.ts";
 
 const log = logger("stages");
 const fileName = (p: string) => p.split(/[\\/]/).pop() ?? p;
@@ -96,7 +96,7 @@ const ROLES: { role: Role; key: Key }[] = [
 ];
 
 export class SyncView extends Stage {
-  private files: { path: string; role: Role }[] = [];
+  private files: { path: string; role: Role; guessed?: boolean }[] = [];
   private results: SyncResultRow[] | null = null;
   private manual: Record<string, string> = {};
   private name = "PODCAST_01_SYNC";
@@ -106,6 +106,26 @@ export class SyncView extends Stage {
     for (const p of paths) if (!this.files.some((f) => f.path === p)) this.files.push({ path: p, role });
     this.results = null;
     this.host.rerender();
+  }
+
+  /** Whole shoot folder: find files, guess roles, then sync straight away. */
+  private scanFolder(): void {
+    void this.run(async () => {
+      const dir = await pickFolder();
+      if (!dir) return;
+      const res = await this.host.client().runJob<{ items: { path: string; kind: string; role?: Role; reason?: string }[] }>(
+        "scan", { dir }, this.onJob);
+      const media = res.items.filter((i) => i.role && (i.kind === "video" || i.kind === "audio"));
+      if (!media.length) throw new Error(t("scanNone"));
+      this.files = media.map((i) => ({ path: i.path, role: i.role!, guessed: i.reason !== "name" }));
+      this.results = null;
+      const v = media.filter((i) => i.kind === "video").length;
+      this.host.notify("ok", t("scanned", { n: media.length, v, a: media.length - v }));
+      this.progress = 0;
+      this.message = t("analyzeSync");
+      this.host.rerender();
+      this.results = (await this.host.client().runJob<{ results: SyncResultRow[] }>("sync", { files: this.files }, this.onJob)).results;
+    });
   }
 
   private analyze(): void {
@@ -145,7 +165,13 @@ export class SyncView extends Stage {
         list.map((f) => {
           const r = this.results?.find((x) => x.path === f.path);
           return h("div", { class: "slot-file" },
-            h("span", { class: "slot-name ltr" }, fileName(f.path)),
+            h("span", { class: "slot-name ltr" }, `${f.guessed ? "? " : ""}${fileName(f.path)}`),
+            h("select", { class: "select slot-role", title: t("roleLabel"), onchange: (e: Event) => {
+              f.role = (e.target as HTMLSelectElement).value as Role;
+              f.guessed = false;
+              this.results = null;
+              this.host.rerender();
+            } }, ROLES.map((r) => h("option", { value: r.role, selected: r.role === f.role }, t(r.key)))),
             r ? pill(t(`conf_${r.confidence}` as Key), r.confidence === "high" ? "ok" : r.confidence === "medium" ? "info" : "bad") : null,
             r?.seqStart != null ? h("span", { class: "slot-off ltr" }, `+${r.seqStart.toFixed(3)} s`) : null,
             r ? h("input", { class: "input frow-num ltr", type: "number", step: 0.001, placeholder: t("manualOffset"),
@@ -159,6 +185,9 @@ export class SyncView extends Stage {
     return [card(t("syncTitle"), this.results ? pill("✓", "ok") : null,
       h("p", { class: "muted small" }, t("syncHelp")),
       engineOk ? null : h("p", { class: "tone-warn small" }, t("motionNeedEngine")),
+      h("div", { class: "folder-pick" },
+        button(t("pickPodcastFolder"), () => this.scanFolder(), { kind: "primary", disabled: this.busy || !engineOk }),
+        h("p", { class: "muted small" }, t("folderHelp"))),
       groups,
       h("div", { class: "frow" }, h("span", { class: "frow-k" }, t("newSeqName")),
         h("input", { class: "input ltr", type: "text", value: this.name, oninput: (e: Event) => { this.name = (e.target as HTMLInputElement).value || "PODCAST_01_SYNC"; } })),

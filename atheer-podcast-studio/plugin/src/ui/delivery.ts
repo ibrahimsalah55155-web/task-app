@@ -85,6 +85,84 @@ export class CaptionsView extends Stage {
   private trTarget: "en" | "ar" = "en";
   private style = "podcast";
   private glossaryText: string | null = null;
+  private previewPng: string | null = null;
+  private previewTimer: ReturnType<typeof setTimeout> | null = null;
+  private sample = "";
+
+  private opt<T extends string | number | boolean>(k: string, d: T): T {
+    const v = this.host.prefs.captionOptions[k];
+    return (v === undefined || v === null ? d : v) as T;
+  }
+
+  private setOpt(k: string, v: string | number | boolean | null): void {
+    if (v === null || v === "") delete this.host.prefs.captionOptions[k];
+    else this.host.prefs.captionOptions[k] = v;
+    this.host.savePrefs();
+    this.schedulePreview();
+  }
+
+  private schedulePreview(): void {
+    if (this.previewTimer) clearTimeout(this.previewTimer);
+    this.previewTimer = setTimeout(() => void this.refreshPreview(), 350);
+  }
+
+  private async refreshPreview(): Promise<void> {
+    const seq = this.host.snapshot()?.activeSequence;
+    const caps = this.current();
+    const text = this.sample || caps?.[0]?.text || "أهلاً بيكم في حلقة جديدة";
+    try {
+      this.previewPng = await this.host.client().captionPreview({
+        text, style: this.style, width: seq?.width ?? 1080, height: seq?.height ?? 1920, accent: this.host.prefs.accent,
+        speaker: caps?.[0]?.speaker ?? "guest", options: this.host.prefs.captionOptions,
+      });
+    } catch (e) {
+      log.debug(`caption preview failed: ${errorMessage(e)}`);
+    }
+    this.host.rerender();
+  }
+
+  private lookCard(): HTMLElement {
+    if (!this.previewPng && !this.previewTimer) this.schedulePreview();
+    const colour = (key: string, label: string) => h("div", { class: "frow" }, h("span", { class: "frow-k" }, label),
+      h("span", { class: "swatch", style: `background:${this.opt(key, "") || "transparent"}` }),
+      h("input", { class: "input frow-num ltr", type: "text", placeholder: "#RRGGBB", value: String(this.opt(key, "")),
+        onchange: (e: Event) => {
+          const v = (e.target as HTMLInputElement).value.trim();
+          this.setOpt(key, /^#?[0-9a-f]{6}$/i.test(v) ? (v.startsWith("#") ? v : `#${v}`) : null);
+          this.host.rerender();
+        } }));
+    const box = this.opt("box", this.style === "podcast" || this.style === "minimal");
+    return h("div", { class: "look" },
+      h("div", { class: "subhead" }, t("capLook")),
+      h("div", { class: "look-row" },
+        h("div", { class: "look-preview" }, this.previewPng ? h("img", { class: "preview-img", src: `data:image/png;base64,${this.previewPng}` }) : null),
+        h("div", { class: "look-controls" },
+          choice(t("capPosition"), (["top", "middle", "bottom", "lower"] as const).map((v) => ({ value: v, label: t(`pos_${v}` as Key) })),
+            this.opt("position", this.style === "minimal" ? "lower" : "bottom") as "top" | "middle" | "bottom" | "lower",
+            (v) => { this.setOpt("position", v); this.setOpt("yPercent", null); this.host.rerender(); }),
+          numField(t("capHeight"), Number(this.opt("yPercent", 0)) || 0, (v) => this.setOpt("yPercent", v > 0 ? v : null), 1, 0, 95),
+          numField(t("capSize"), Number(this.opt("size", 1)), (v) => this.setOpt("size", v), 0.05, 0.4, 3),
+          numField(t("capWidth"), Number(this.opt("maxWidthPercent", 90)), (v) => this.setOpt("maxWidthPercent", v), 1, 30, 100),
+          colour("textColor", t("capText")),
+          colour("highlightColor", t("capHighlight")),
+          toggle(t("capBox"), Boolean(box), (v) => { this.setOpt("box", v); this.host.rerender(); }),
+          box ? [colour("boxColor", t("capBoxColor")),
+            numField(t("capBoxOpacity"), Number(this.opt("boxOpacity", this.style === "podcast" ? 1 : 0.55)), (v) => this.setOpt("boxOpacity", v), 0.05, 0, 1)] : null,
+          colour("guestColor", t("capGuest")),
+          colour("hostColor", t("capHost")),
+          toggle(t("capShadow"), Boolean(this.opt("shadow", this.style === "clean" || this.style === "word")), (v) => { this.setOpt("shadow", v); this.host.rerender(); }),
+          toggle(t("capWordByWord"), Boolean(this.opt("wordByWord", false)), (v) => { this.setOpt("wordByWord", v); this.host.rerender(); }),
+          toggle(t("capMedium"), this.opt<string>("weight", "bold") === "medium", (v) => { this.setOpt("weight", v ? "medium" : null); this.host.rerender(); }),
+          h("div", { class: "frow" }, h("span", { class: "frow-k" }, t("capSample")),
+            h("input", { class: "input", type: "text", dir: "auto", value: this.sample,
+              oninput: (e: Event) => { this.sample = (e.target as HTMLInputElement).value; this.schedulePreview(); } })),
+          h("div", { class: "actions" }, button(t("capReset"), () => {
+            this.host.prefs.captionOptions = {};
+            this.host.savePrefs();
+            this.schedulePreview();
+            this.host.rerender();
+          }, { kind: "ghost" })))));
+  }
   private rulesText: string | null = null;
   private wordsOpen = false;
 
@@ -201,6 +279,7 @@ export class CaptionsView extends Stage {
       const res = await this.host.client().runJob<{ items: { path: string; start: number; end: number }[] }>("render_captions", {
         captions: caps, style: this.style, width: seq.width ?? 1080, height: seq.height ?? 1920, accent: this.host.prefs.accent,
         outDir: joinPath(dir, "MAG Captions", `${seq.name}_${this.style}_${Date.now().toString(36)}`),
+        options: this.host.prefs.captionOptions,
       }, (j) => { this.progress = j.progress * 0.7; this.message = j.message; this.host.rerender(); });
       this.message = t("addCaptions");
       const r = await placeStills(live.project, live.seq, res.items, `${seq.name} ${this.style}`);
@@ -270,7 +349,8 @@ export class CaptionsView extends Stage {
         hasTr ? choice(t("showing"), (["orig", "tr"] as const).map((v) => ({ value: v, label: t(`show_${v}` as Key) })), this.showing,
           (v) => { this.showing = v; this.host.rerender(); }) : null,
       ] : null,
-      caps ? choice(t("style"), styles, this.style, (v) => { this.style = v; this.host.rerender(); }) : null,
+      caps ? choice(t("style"), styles, this.style, (v) => { this.style = v; this.schedulePreview(); this.host.rerender(); }) : null,
+      caps ? this.lookCard() : null,
       caps ? h("div", { class: "actions" },
         button(t("exportSrt"), () => this.srt(), { disabled: this.busy }),
         button(t("nativeCaptions"), () => this.native(), { disabled: this.busy }),

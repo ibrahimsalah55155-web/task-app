@@ -115,6 +115,10 @@ class DiarizeBody(BaseModel):
     speakers: int = Field(default=2, ge=0, le=6)  # 0 = find out
 
 
+class ScanBody(BaseModel):
+    dir: str
+
+
 class ListBody(BaseModel):
     dir: str
     exts: list[str] = Field(min_length=1, max_length=20)
@@ -140,6 +144,17 @@ class CaptionRenderBody(BaseModel):
     height: int = 1920
     accent: str | None = None
     outDir: str
+    options: dict[str, Any] = Field(default_factory=dict)
+
+
+class CaptionPreviewBody(BaseModel):
+    text: str = "أهلاً بيكم في حلقة جديدة"
+    style: str = "podcast"
+    width: int = 1080
+    height: int = 1920
+    accent: str | None = None
+    speaker: str | None = "guest"
+    options: dict[str, Any] = Field(default_factory=dict)
 
 
 class SrtBody(BaseModel):
@@ -258,6 +273,12 @@ def register(app: FastAPI, jobs: JobManager, store: Store, data_dir: Path, ffmpe
         return diarize.diarize_track(cache, _tracks([body.track])[0], body.duration, body.speakers,
                                      progress=lambda x, m: ctx.progress(x, m), cancel=ctx.cancel_event)
 
+    def scan_job(ctx, p):
+        from .analysis.scan import scan_folder
+
+        body = ScanBody(**p)
+        return scan_folder(ffprobe_get(), body.dir, progress=lambda x, m: ctx.progress(x, m), cancel=ctx.cancel_event)
+
     def translate_job(ctx, p):
         body = TranslateBody(**p)
         return {"captions": translate.translate_captions(body.captions, body.source, body.target,
@@ -268,7 +289,8 @@ def register(app: FastAPI, jobs: JobManager, store: Store, data_dir: Path, ffmpe
     def captions_job(ctx, p):
         body = CaptionRenderBody(**p)
         items = render_caption_stills(body.captions, body.style, body.width, body.height, Path(body.outDir),
-                                      body.accent, progress=lambda x, m: ctx.progress(x, m), cancel=ctx.cancel_event)
+                                      body.accent, progress=lambda x, m: ctx.progress(x, m), cancel=ctx.cancel_event,
+                                      opts=body.options)
         return {"items": items}
 
     def faces_job(ctx, p):
@@ -278,7 +300,7 @@ def register(app: FastAPI, jobs: JobManager, store: Store, data_dir: Path, ffmpe
     for kind, fn in (("sync", sync_job), ("silence", silence_job), ("director", director_job),
                      ("transcribe", transcribe_job), ("render_captions", captions_job), ("faces", faces_job),
                      ("cleanup", cleanup_job), ("color", color_job), ("diarize", diarize_job),
-                     ("translate", translate_job)):
+                     ("translate", translate_job), ("scan", scan_job)):
         jobs.register(kind, fn)
 
     def submit(kind: str, model: type[BaseModel]):
@@ -300,6 +322,7 @@ def register(app: FastAPI, jobs: JobManager, store: Store, data_dir: Path, ffmpe
     app.post(PREFIX + "/jobs/color", dependencies=authed, status_code=202)(submit("color", ColorMeasureBody))
     app.post(PREFIX + "/jobs/diarize", dependencies=authed, status_code=202)(submit("diarize", DiarizeBody))
     app.post(PREFIX + "/jobs/translate", dependencies=authed, status_code=202)(submit("translate", TranslateBody))
+    app.post(PREFIX + "/jobs/scan", dependencies=authed, status_code=202)(submit("scan", ScanBody))
 
     # ---- quick (synchronous) helpers ---------------------------------------------------
 
@@ -340,6 +363,18 @@ def register(app: FastAPI, jobs: JobManager, store: Store, data_dir: Path, ffmpe
     @app.post(PREFIX + "/captions/build", dependencies=authed)
     async def captions_build(body: CaptionBuildBody) -> dict[str, Any]:
         return {"captions": build_captions(body.words, body.maxChars, body.maxDur)}
+
+    @app.post(PREFIX + "/captions/preview", dependencies=authed)
+    async def captions_preview(body: CaptionPreviewBody) -> dict[str, Any]:
+        import base64
+
+        from .analysis.captions import preview_caption
+
+        if body.style not in STYLES:
+            raise HTTPException(400, detail={"code": "bad_request", "message": "unknown style"})
+        png = await asyncio.to_thread(preview_caption, body.text, body.style, body.width, body.height, body.accent,
+                                      body.speaker, body.options, 1 if body.style == "word" else None)
+        return {"png": base64.b64encode(png).decode()}
 
     @app.post(PREFIX + "/captions/srt", dependencies=authed)
     async def captions_srt(body: SrtBody) -> dict[str, Any]:

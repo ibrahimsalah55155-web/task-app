@@ -367,3 +367,78 @@ body {
 /* finishing tools */
 .textarea { width: 100%; min-height: 72px; resize: vertical; font-family: inherit; }
 .ltr-mixed { unicode-bidi: plaintext; }
+
+/* ======================================================================
+ * Multimedia & AI Group look (same family as the team's Injaz/archive app):
+ * deep charcoal, soft raised cards, lime accent, rounded pills, IBM Plex Sans Arabic.
+ * Overrides the tokens and shapes above; UXP-safe properties only.
+ * ====================================================================== */
+@font-face { font-family: "Plex Arabic"; font-weight: 400; src: url("fonts/IBMPlexSansArabic-Regular.ttf"); }
+@font-face { font-family: "Plex Arabic"; font-weight: 500; src: url("fonts/IBMPlexSansArabic-Medium.ttf"); }
+@font-face { font-family: "Plex Arabic"; font-weight: 700; src: url("fonts/IBMPlexSansArabic-Bold.ttf"); }
+
+:root {
+  --bg: #0C0D0F;
+  --surface: #1B1D20;
+  --surface-2: #24272B;
+  --line: #2C2F34;
+  --text: #F1F3EC;
+  --muted: #A5A99E;
+  --accent: #C8F031;
+  --accent-text: #10140A;
+  --ok: #CFF24A;
+  --warn: #F3C350;
+  --bad: #FF6B5E;
+  --info: #8EC5FF;
+}
+
+body { font-family: "Plex Arabic", "Segoe UI", "Adobe Clean", Tahoma, sans-serif; font-size: 12.5px; }
+
+.header { padding: 12px 14px 10px 14px; border-bottom: 0; background-color: var(--bg); }
+.brand-mark { font-size: 14px; color: var(--text); }
+.brand-sub { color: var(--accent); }
+.lang-btn { border-radius: 14px; padding: 3px 12px; background-color: var(--surface-2); border-color: var(--surface-2); color: var(--text); }
+.lang-btn:hover { border-color: var(--accent); }
+
+.nav { padding: 4px 10px 8px 10px; border-bottom: 1px solid var(--line); }
+.nav-item { border-radius: 14px; padding: 4px 12px; border: 1px solid transparent; color: var(--muted); }
+.nav-item:hover { background-color: var(--surface-2); color: var(--text); }
+.nav-item.is-active { background-color: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 700; }
+
+.content { background-color: var(--bg); }
+.card { background-color: var(--surface); border: 1px solid var(--line); border-radius: 16px; }
+.card-head { border-bottom: 1px solid var(--line); padding: 10px 14px; }
+.card-title { font-size: 13px; letter-spacing: 0; }
+.card-body { padding: 10px 14px 14px 14px; }
+
+.pill { border-radius: 12px; padding: 1px 9px; background-color: var(--surface-2); }
+.btn { border-radius: 16px; padding: 5px 14px; background-color: var(--surface-2); border: 1px solid var(--line); color: var(--text); }
+.btn:hover { border-color: var(--accent); }
+.btn-primary { background-color: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.btn-primary:hover { background-color: #DDFF63; border-color: #DDFF63; }
+.btn-ghost { background-color: transparent; }
+.seg-item { border-radius: 0; background-color: var(--surface-2); border-color: var(--line); }
+.seg-item:first-child { border-top-left-radius: 12px; border-bottom-left-radius: 12px; }
+.seg-item:last-child { border-top-right-radius: 12px; border-bottom-right-radius: 12px; }
+.seg-item.is-active { background-color: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 700; }
+.input, .select, .textarea { border-radius: 10px; }
+.tick { border-radius: 6px; }
+.tick.on { background-color: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.progress-track { height: 6px; border-radius: 3px; }
+.progress-bar { background-color: var(--accent); border-radius: 3px; }
+.tpl { border-radius: 12px; background-color: var(--surface-2); }
+.tpl.is-active { border-color: var(--accent); }
+
+/* caption look + folder pick */
+.folder-pick { margin: 6px 0 10px 0; padding: 10px 12px; border-radius: 14px; background-color: var(--surface-2); border: 1px dashed var(--line); }
+.look { margin-top: 8px; }
+.look-row { display: flex; flex-direction: row; align-items: flex-start; }
+.look-preview { width: 34%; max-width: 180px; margin-right: 10px; border-radius: 12px; overflow: hidden; background-color: var(--surface-2); }
+.look-controls { flex-grow: 1; }
+.swatch { width: 16px; height: 16px; border-radius: 8px; border: 1px solid var(--line); margin-right: 6px; flex-shrink: 0; }
+.slot-role { min-width: 90px; margin: 0 6px; }
+.rtl .look-row { flex-direction: row-reverse; }
+.rtl .look-preview { margin-right: 0; margin-left: 10px; }
+.rtl .swatch { margin-right: 0; margin-left: 6px; }
+.input, .select, .textarea { background-color: var(--surface-2); color: var(--text); border: 1px solid var(--line); padding: 4px 8px; }
+.input:focus, .textarea:focus { border-color: var(--accent); }

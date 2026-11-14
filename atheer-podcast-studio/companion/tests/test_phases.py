@@ -137,3 +137,31 @@ def test_quick_endpoints(authed, tmp_path):
     reels = authed.post("/api/v1/reels/find", json={"words": words_from("ليه ده مهم؟ " * 60), "count": 2,
                                                      "minDur": 10, "maxDur": 20}).json()["reels"]
     assert len(reels) >= 1
+
+
+def test_caption_options_move_resize_and_recolour(tmp_path):
+    caps = build_captions(words_from("نحرص على الزيارات العائلية", speaker="guest"))
+
+    def bbox(opts):
+        items = render_caption_stills(caps, "podcast", 540, 960, tmp_path / str(len(list(tmp_path.iterdir()))), opts=opts)
+        im = np.asarray(Image.open(items[0]["path"]))
+        ys, xs = np.nonzero(im[..., 3])
+        return ys.min(), ys.max(), xs.min(), xs.max(), im
+    top = bbox({"position": "top"})
+    bottom = bbox({})
+    assert top[1] < bottom[0]  # top caption entirely above the default one
+    big = bbox({"size": 1.6})
+    assert (big[3] - big[2]) > (bottom[3] - bottom[2]) * 1.3
+    red = bbox({"guestColor": "#FF0000"})[4]
+    px = red[red[..., 3] == 255][:, :3]
+    assert ((px[:, 0] > 200) & (px[:, 1] < 60)).mean() > 0.3  # box is red now
+    clear = bbox({"box": False, "shadow": False, "textColor": "#00FF00"})[4]
+    g = clear[clear[..., 3] > 200][:, :3]
+    assert ((g[:, 1] > 200) & (g[:, 0] < 60)).mean() > 0.8  # only green text, no box
+    huge = bbox({"size": 4.0, "maxWidthPercent": 80})
+    assert huge[3] - huge[2] <= 0.8 * 540 + 2  # long line shrinks to fit
+
+
+def test_caption_preview_endpoint(authed):
+    r = authed.post("/api/v1/captions/preview", json={"style": "minimal", "options": {"position": "middle"}})
+    assert r.status_code == 200 and len(r.json()["png"]) > 1000

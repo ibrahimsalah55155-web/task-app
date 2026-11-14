@@ -15,6 +15,8 @@ export interface Prefs {
   /** Voice clean-up of sound inside video files: per sequence guid, the original audio tracks muted. */
   cleanMuted: Record<string, number[]>;
   mogrtDir: string | null;
+  /** Caption look chosen in the Captions stage (overrides the style's defaults). */
+  captionOptions: Record<string, string | number | boolean | null>;
 }
 
 const KEY = "mag.prefs.v1";
@@ -31,6 +33,7 @@ export const DEFAULT_PREFS: Prefs = {
   cleanMap: {},
   cleanMuted: {},
   mogrtDir: null,
+  captionOptions: {},
 };
 
 function storage(): Storage | null {

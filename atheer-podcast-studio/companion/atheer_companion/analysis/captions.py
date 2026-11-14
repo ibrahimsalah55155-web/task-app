@@ -94,43 +94,79 @@ STYLES = {
 }
 
 
-def _draw_caption(f: Frame, ctx: Ctx, text: str, style: str, speaker: str | None, highlight: int | None) -> None:
-    s = ctx.s
-    portrait = ctx.portrait
-    y = (0.60 if portrait else 0.84) * ctx.h
-    if style == "minimal":
-        y = (0.78 if portrait else 0.88) * ctx.h
-    size = {"podcast": 34, "clean": 46, "word": 50, "minimal": 32}[style] * s
-    m = shape_line(text, size, "bold" if style != "minimal" else "medium")
-    cx = ctx.w / 2
-    x0, y0 = int(cx - m.width / 2), int(y - m.height / 2)
+def _hex(c: str | None, fallback: str) -> tuple[int, int, int]:
+    try:
+        return hex_rgb(c) if c else hex_rgb(fallback)
+    except Exception:  # noqa: BLE001
+        return hex_rgb(fallback)
+
+
+def style_defaults(style: str, accent: str) -> dict[str, Any]:
+    """Every style as plain settings; the panel's caption controls override any of them."""
+    base = {"position": "bottom", "yPercent": None, "size": 1.0, "weight": "bold", "textColor": INK,
+            "highlightColor": accent, "box": False, "boxColor": "#000000", "boxOpacity": 0.55, "radius": 8,
+            "shadow": True, "maxWidthPercent": 90, "guestColor": None, "hostColor": None}
     if style == "podcast":
-        guest = speaker != "host"
-        padx, pady = 16 * s, 7 * s
-        pill, _, _ = rounded_rect_mask(m.width + 2 * padx, m.height + 2 * pady, 10 * s)
-        f.paint(pill, int(cx - pill.shape[1] / 2), int(y - pill.shape[0] / 2), hex_rgb(ctx.accent if guest else PAPER))
-        f.paint(m.mask, x0, y0, hex_rgb(INK if guest else PAPER_INK))
-        return
+        return {**base, "box": True, "boxOpacity": 1.0, "radius": 10, "shadow": False, "baseSize": 34,
+                "guestColor": accent, "hostColor": PAPER, "guestText": INK, "hostText": PAPER_INK}
     if style == "minimal":
-        padx, pady = 14 * s, 6 * s
-        pill, _, _ = rounded_rect_mask(m.width + 2 * padx, m.height + 2 * pady, 6 * s)
-        f.paint(pill, int(cx - pill.shape[1] / 2), int(y - pill.shape[0] / 2), (0, 0, 0), 0.55)
-        f.paint(m.mask, x0, y0, hex_rgb(INK))
-        return
-    shadow = blur(m.mask, 5 * s)
-    pad = (shadow.shape[0] - m.mask.shape[0]) // 2
-    f.paint(shadow, x0 - pad, y0 - pad + int(3 * s), (0, 0, 0), 0.7)
-    f.paint(m.mask, x0, y0, hex_rgb(INK))
-    if style == "word" and highlight is not None:
+        return {**base, "box": True, "boxOpacity": 0.55, "radius": 6, "shadow": False, "baseSize": 32,
+                "weight": "medium", "position": "lower"}
+    if style == "clean":
+        return {**base, "baseSize": 46}
+    return {**base, "baseSize": 50}  # word
+
+
+def _y(o: dict[str, Any], ctx: Ctx) -> float:
+    if o.get("yPercent") is not None:
+        return max(5.0, min(95.0, float(o["yPercent"]))) / 100 * ctx.h
+    pos = o.get("position", "bottom")
+    table = {"top": (0.16, 0.12), "middle": (0.50, 0.50), "bottom": (0.60, 0.84), "lower": (0.78, 0.88)}
+    p, l = table.get(pos, table["bottom"])
+    return (p if ctx.portrait else l) * ctx.h
+
+
+def _draw_caption(f: Frame, ctx: Ctx, text: str, style: str, speaker: str | None, highlight: int | None,
+                  opts: dict[str, Any] | None = None) -> None:
+    s = ctx.s
+    o = {**style_defaults(style, ctx.accent), **{k: v for k, v in (opts or {}).items() if v is not None and v != ""}}
+    size = float(o["baseSize"]) * float(o.get("size", 1.0)) * s
+    weight = "medium" if o.get("weight") == "medium" else "bold"
+    m = shape_line(text, size, weight)
+    max_w = float(o.get("maxWidthPercent", 90)) / 100 * ctx.w
+    pad_of = (lambda mm: (0.45 * mm.height, 0.2 * mm.height)) if o.get("box") else (lambda mm: (0.0, 0.0))
+    total = m.width + 2 * pad_of(m)[0]
+    if total > max_w:  # long line: shrink to fit (box included) instead of running off the frame
+        m = shape_line(text, size * max_w / total * 0.98, weight)
+    cx = ctx.w / 2
+    y = _y(o, ctx)
+    x0, y0 = int(cx - m.width / 2), int(y - m.height / 2)
+    who = "host" if speaker == "host" else "guest" if speaker == "guest" else None
+    text_rgb = _hex(o.get(f"{who}Text") if who and style == "podcast" and not (opts or {}).get("textColor") else o.get("textColor"), INK)
+    if o.get("box"):
+        box_hex = o.get(f"{who}Color") if who and o.get(f"{who}Color") else o.get("boxColor")
+        padx, pady = pad_of(m)
+        pill, _, _ = rounded_rect_mask(m.width + 2 * padx, m.height + 2 * pady, float(o.get("radius", 8)) * s)
+        f.paint(pill, int(cx - pill.shape[1] / 2), int(y - pill.shape[0] / 2), _hex(box_hex, "#000000"),
+                float(o.get("boxOpacity", 1.0)))
+    else:
+        if who and o.get(f"{who}Color") and (opts or {}).get(f"{who}Color"):
+            text_rgb = _hex(o.get(f"{who}Color"), INK)
+    if o.get("shadow"):
+        shadow = blur(m.mask, 5 * s)
+        pad = (shadow.shape[0] - m.mask.shape[0]) // 2
+        f.paint(shadow, x0 - pad, y0 - pad + int(3 * s), (0, 0, 0), 0.7)
+    f.paint(m.mask, x0, y0, text_rgb)
+    if highlight is not None:
         spans = word_spans(text, m)
         if 0 <= highlight < len(spans):
             a, b = spans[highlight]
-            sub = m.mask[:, a:b]
-            f.paint(sub, x0 + a, y0, hex_rgb(ctx.accent))
+            f.paint(m.mask[:, a:b], x0 + a, y0, _hex(o.get("highlightColor"), ctx.accent))
 
 
 def render_caption_stills(captions: list[dict[str, Any]], style: str, width: int, height: int, out_dir: Path,
-                          accent: str | None = None, progress=None, cancel=None) -> list[dict[str, Any]]:
+                          accent: str | None = None, progress=None, cancel=None,
+                          opts: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """One transparent PNG per caption (per word for the 'word' style), with its time range."""
     if style not in STYLES:
         raise ValueError(f"unknown caption style {style}")
@@ -150,7 +186,7 @@ def render_caption_stills(captions: list[dict[str, Any]], style: str, width: int
         if progress and i % 10 == 0:
             progress(i / max(1, total), "Rendering captions")
         states: list[tuple[float, float, int | None]]
-        if style == "word" and c.get("words"):
+        if (style == "word" or (opts or {}).get("wordByWord")) and c.get("words"):
             ws = c["words"]
             states = [(ws[k]["start"] if k else c["start"], ws[k + 1]["start"] if k + 1 < len(ws) else c["end"], k)
                       for k in range(len(ws))]
@@ -160,9 +196,25 @@ def render_caption_stills(captions: list[dict[str, Any]], style: str, width: int
             if b - a < 0.04:
                 continue
             f = Frame(width, height)
-            _draw_caption(f, ctx, c["text"], style, c.get("speaker"), hl)
+            _draw_caption(f, ctx, c["text"], style, c.get("speaker"), hl, opts)
             name = f"CAP_{run}_{i + 1:04d}{'' if hl is None else f'_{hl + 1:02d}'}.png"
             path = out_dir / name
             Image.fromarray(f.to_rgba8(), "RGBA").save(path, optimize=False, compress_level=6)
             items.append({"path": str(path), "start": round(a, 3), "end": round(b, 3), "caption": i})
     return items
+
+
+def preview_caption(text: str, style: str, width: int, height: int, accent: str | None = None,
+                    speaker: str | None = "guest", opts: dict[str, Any] | None = None, highlight: int | None = None) -> bytes:
+    """PNG of one caption over a neutral grey frame (for the panel's live preview)."""
+    import io
+
+    f = Frame(width, height)
+    _draw_caption(f, Ctx(w=width, h=height, accent=accent or ACCENT), text, style, speaker, highlight, opts)
+    rgba = f.to_rgba8()
+    bg = Image.new("RGBA", (width, height), (58, 60, 64, 255))
+    bg.alpha_composite(Image.fromarray(rgba, "RGBA"))
+    bg.thumbnail((360, 640))
+    buf = io.BytesIO()
+    bg.convert("RGB").save(buf, "PNG")
+    return buf.getvalue()

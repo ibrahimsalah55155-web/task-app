@@ -503,6 +503,11 @@ export class CompanionClient {
     return (await this.request<{ files: string[] }>("POST", "/api/v1/fs/list", { body: { dir, exts, recursive }, timeoutMs: 30000 })).files;
   }
 
+  async captionPreview(req: { text: string; style: string; width: number; height: number; accent?: string; speaker?: string;
+    options: Record<string, unknown> }): Promise<string> {
+    return (await this.request<{ png: string }>("POST", "/api/v1/captions/preview", { body: req, timeoutMs: 20000 })).png;
+  }
+
   async logs(tail = 200): Promise<string[]> {
     return (await this.request<{ lines: string[] }>("GET", `/api/v1/logs?tail=${tail}`)).lines;
   }

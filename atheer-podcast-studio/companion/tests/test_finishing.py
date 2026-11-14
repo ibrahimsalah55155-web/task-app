@@ -264,3 +264,27 @@ def test_fs_list(authed, tmp_path):
     deep = authed.post("/api/v1/fs/list", json={"dir": str(tmp_path), "exts": ["mogrt"], "recursive": True}).json()["files"]
     assert [Path(f).name for f in flat] == ["a.mogrt"] and len(deep) == 2
     assert authed.post("/api/v1/fs/list", json={"dir": "rel", "exts": ["mogrt"]}).status_code == 400
+
+
+@needs_ffmpeg
+def test_scan_podcast_folder_finds_files_and_guesses_roles(authed, tmp_path):
+    root = tmp_path / "EP12"
+    for rel in ["Cam A Guest/C0001.MP4", "Cam A Guest/C0002.MP4", "Cam B/MrBeast_host.mp4", "Cam C/clip.mov",
+                "Zoom/TR1.WAV", "Zoom/TR2.WAV", "MAG Captions/x.mov"]:
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if p.suffix.lower() in (".wav",):
+            subprocess.run([FFMPEG, "-v", "error", "-f", "lavfi", "-i", "sine=f=300:d=1", str(p)], check=True)
+        else:
+            subprocess.run([FFMPEG, "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=160x90:d=1", "-f", "lavfi", "-i",
+                            "sine=d=1", "-shortest", "-c:v", "mpeg4", "-c:a", "aac", str(p)], check=True)
+    (root / "notes.txt").write_text("x")
+    r = authed.post("/api/v1/jobs/scan", json={"dir": str(root)})
+    job = wait_job(authed, r.json()["job"]["id"], timeout=60)
+    assert job["state"] == "succeeded", job
+    roles = {Path(i["path"]).relative_to(root).as_posix(): i["role"] for i in job["result"]["items"]}
+    assert "MAG Captions/x.mov" not in roles  # the plugin's own output is skipped
+    assert roles["Cam A Guest/C0001.MP4"] == roles["Cam A Guest/C0002.MP4"] == "guest_cam"
+    assert roles["Cam B/MrBeast_host.mp4"] == "host_cam"
+    assert roles["Cam C/clip.mov"] == "wide_cam"  # the one camera left
+    assert {roles["Zoom/TR1.WAV"], roles["Zoom/TR2.WAV"]} == {"guest_mic", "host_mic"}
